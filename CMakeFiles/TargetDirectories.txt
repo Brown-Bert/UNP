@@ -1,0 +1,5 @@
+/home/yzx/vscode/workspace/UNP/CMakeFiles/edit_cache.dir
+/home/yzx/vscode/workspace/UNP/CMakeFiles/rebuild_cache.dir
+/home/yzx/vscode/workspace/UNP/src/CMakeFiles/main.dir
+/home/yzx/vscode/workspace/UNP/src/CMakeFiles/edit_cache.dir
+/home/yzx/vscode/workspace/UNP/src/CMakeFiles/rebuild_cache.dir
