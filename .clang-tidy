@@ -1,0 +1,70 @@
+# Checks: 
+#   '-*' 
+# CheckOptions:
+#   - key:    readability-identifier-naming.ClassCase
+#     value:  CamelCase
+#   - key:    readability-identifier-naming.FunctionCase
+#     value:  camelCase
+#   - key:    readability-identifier-naming.VariableCase
+#     value:  camelBack
+#   - key:    readability-identifier-naming.ParameterCase
+#     value:  camelBack
+#   - key:    readability-identifier-naming.EnumCase
+#     value:  CamelCase
+
+
+# Note, you can't have comments below in a '>' section, that's why here are the comments upfront.
+# -hicpp-deprecated-headers: unfortunately, should be restrictable to <>-includes
+# -readability-function-cognitive-complexity: goes bogus in gtests unfortunately
+# -cppcoreguidelines-pro-type-member-init: buggy unfortunately
+
+Checks: >
+  *,
+  -cppcoreguidelines-avoid-non-const-global-variables,
+  -cert-err58-cpp,
+  -fuchsia-statically-constructed-objects,
+  -readability-magic-numbers,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-narrowing-conversions,
+  -performance-enum-size,
+  -llvmlibc-inline-function-decl,
+  -hicpp-vararg,
+  -cppcoreguidelines-pro-type-vararg,
+  -altera-id-dependent-backward-branch,
+  -altera-struct-pack-align,
+  -altera-unroll-loops,
+  -bugprone-easily-swappable-parameters,
+  -cert-dcl16-c,
+  -cert-dcl21-cpp,
+  -clang-analyzer-deadcode,
+  -clang-diagnostic-error,
+  -clang-diagnostic-unused-macros,
+  -cppcoreguidelines-macro-usage,
+  -cppcoreguidelines-non-private-member-variables-in-classes,
+  -cppcoreguidelines-owning-memory,
+  -cppcoreguidelines-pro-type-member-init,
+  -cppcoreguidelines-pro-type-reinterpret-cast,
+  -cppcoreguidelines-special-member-functions,
+  -fuchsia-default-arguments-calls,
+  -fuchsia-default-arguments-declarations,
+  -fuchsia-overloaded-operator,
+  -fuchsia-trailing-return,
+  -google-explicit-constructor,
+  -google-readability-avoid-underscore-in-googletest-name,
+  -google-readability-braces-around-statements,
+  -hicpp-braces-around-statements,readability-braces-around-statements,
+  -hicpp-deprecated-headers,
+  -hicpp-explicit-conversions,
+  -hicpp-member-init,
+  -hicpp-named-parameter,
+  -hicpp-special-member-functions,
+  -hicpp-uppercase-literal-suffix,
+  -llvmlibc-callee-namespace,
+  -llvmlibc-implementation-in-namespace,
+  -llvm-include-order,
+  -llvmlibc-restrict-system-libc-headers,
+  -llvm-header-guard,
+  -misc-non-private-member-variables-in-classes,
+  -modernize-deprecated-headers,
+  -modernize-use-trailing-return-type,
+  -readability-braces-a
