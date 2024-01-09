@@ -34,7 +34,7 @@ int main()
         perror("connect()");
         exit(1);
     }
-    sleep(10);
+    sleep(5);
     close(socket_d);
     return 0;
 }

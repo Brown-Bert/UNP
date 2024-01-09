@@ -1,16 +1,30 @@
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
+#include <asm-generic/socket.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netinet/ip.h>
 #include <arpa/inet.h>
+#include <sys/wait.h>
 #include <unistd.h>
+#include <signal.h>
+#include <wait.h>
+
+void sig_child(int signo)
+{
+    puts("打断");
+    pid_t pid;
+    int stat = 12;
+    pid = wait(&stat);
+    printf("stat = %d\n", stat);
+    return;
+}
 
 int main()
 {
-    
+    // signal(SIGCHLD, sig_child);
     // 创建套接字
     int socket_d = socket(AF_INET, SOCK_STREAM, 0);
     if (socket_d < 0) 
@@ -18,6 +32,10 @@ int main()
         perror("socket()");
         exit(1);
     }
+
+    // 复用套接口
+    int val = 1;
+    setsockopt(socket_d,SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val));
     
     // 绑定远程的ip和端口
     struct sockaddr_in laddr, raddr;
@@ -53,7 +71,12 @@ int main()
         {
             // 做相应的处理
             close(newsd);
+            exit(0);
         }
+        int stat;
+        wait(&stat);
+        printf("tt = %d\n", stat);
+        close(newsd);
     }
     close(socket_d);
     return 0;
