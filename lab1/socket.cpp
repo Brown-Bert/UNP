@@ -169,6 +169,8 @@ void Server::myAccept()
             perror("fork()");
             exit(-1);
         }
+        printf("pid = %d\n", pid);
+        printf("ppid = %d\n", getpid());
         if (pid == 0) // 子进程
         {
             close(socket_d);
@@ -185,13 +187,15 @@ void Server::myAccept()
                 if (!strncmp(buf, "EOF", strlen(buf))) 
                 {
                     sendData(newsd, buf, 1);
-                    // puts("end");
+                    puts("123456");
+                    sleep(10);
+                    break;
                 }else {
                     sendData(newsd, buf, 0);
                 }
                 // memset(buf, 0, sizeof(buf));
             }
-            // puts("end");
+            puts("end");
             close(newsd);
             exit(0);
         }
