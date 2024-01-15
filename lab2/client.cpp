@@ -1,4 +1,5 @@
 #include <arpa/inet.h>
+#include <asm-generic/socket.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <cstdio>
@@ -62,20 +63,33 @@ int main()
 
     char *resN = NULL;
     char buf[BUFSIZE];
+    // shutdown(socket_d, SHUT_RD);
     while ((resN = (fgets(buf, BUFSIZE, stdin))) != NULL) {
         sendData(socket_d, buf, 0);
         // sleep(1);
         sendData(socket_d, buf, 1);
+        // sleep(1);
         int res = -1;
+        
         while ((res = readData(socket_d, buf)) != 0)
         {
+            // printf("res = %d\n", res);
             if (!strncmp(buf, "EOF", strlen(buf)))
             {
                 puts("tiao");
                 break;
             }
             printf("%s", buf);
+            shutdown(socket_d, SHUT_WR);
+            // shutdown(socket_d, SHUT_RDWR);
+            // struct linger ll;
+            // ll.l_onoff = 1;
+            // ll.l_linger = 0;
+            // setsockopt(socket_d, SOL_SOCKET, SO_REUSEADDR, &ll, sizeof(ll));
+            // close(socket_d);
         }
+        // printf("res = %d\n", res);
     }
+    puts("asjhdfg");
     exit(0);
 }
