@@ -41,6 +41,8 @@ my_size_t readData(my_size_t fd, char *buf)
     return res;
 }
 
+class A{};
+
 
 int main()
 {
@@ -80,7 +82,7 @@ int main()
                 break;
             }
             printf("%s", buf);
-            shutdown(socket_d, SHUT_WR);
+            // shutdown(socket_d, SHUT_WR);
             // shutdown(socket_d, SHUT_RDWR);
             // struct linger ll;
             // ll.l_onoff = 1;

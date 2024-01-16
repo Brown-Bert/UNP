@@ -98,8 +98,8 @@ int main(int argc, char* argv[])
             }else
             {
                 // 表明是已经建立的连接要通信，而不是客户端请求连接
-                char buf[REVENTSSIZE];
-                my_size_t len = read(fd, buf, REVENTSSIZE);
+                char buf[5] = {0};
+                my_size_t len = read(fd, buf, 4);
                 if (len < 0)
                 {
                     perror("read()");
@@ -114,6 +114,7 @@ int main(int argc, char* argv[])
                     close(fd);
                 }else
                 {
+                    printf("res = %s\n", buf);
                     write(fd, buf, strlen(buf) + 1);
                 }
             }

@@ -54,10 +54,12 @@ check THREADCHECK[THREADHIGHCOUNT]; // 线程检测数组，当低潮标志线�
 my_size_t FLAG = 0;
 my_size_t MYFLAG = 0; // 用于同步线程
 my_size_t COUNT = LOWLEVEL / THREADHIGHCOUNT; // 让消费任务的线程消费COUNT轮任务之后，再去减少线程
+// my_size_t COUNT = 6;
 my_size_t CHECKFLAG = 0; // 用于关闭所有检测的线程
 my_size_t CHECKHIGHFLAG = 0; // 用于关闭checkHigh线程的标志
 my_size_t CHECKLOWFLAG = 0; // 用于关闭checkLow线程的标志
 my_size_t SHUTDOWNFLAG = 0; // 当任务数量为0时通知shutdown线程
+my_size_t FINISHED = 0; // 统计有多少线程完成number轮
 
 pid_t mainPid = 0; // 记录进程的pid用于最后发送信号终结进程
 
@@ -128,7 +130,8 @@ void *ThreadFunction(void* p)
     
     // 线程执行的逻辑
     // pthread_mutex_lock(&mtx_tasks);
-    my_size_t number = -1;
+    my_size_t number = COUNT;
+    FINISHED = CURRENTTHREADCOUNT;
     while (true) 
     { // 线程一旦开启就是死循环，直到有信号来打断他结束这个线程的生命
         // printf("iiid = %d\n", id);
@@ -211,11 +214,19 @@ void *ThreadFunction(void* p)
         // std::this_thread::sleep_for(dura);
         if (CURRENTTASKCOUNT < LOWLEVEL)
         {
-            // 任务少于低潮标志的时候，才去通知checkLow线程去减少线程数量
             if (number < 0)
             {
-                pthread_cond_signal(&cond_notify_becauseoflow); // 任务减少，可能会导致低于低潮所以需要通知线程去判断
+                pthread_mutex_lock(&mtx_tasks);
+                FINISHED++;
+                pthread_mutex_unlock(&mtx_tasks);
                 number = COUNT;
+            }
+
+            // 任务少于低潮标志的时候，才去通知checkLow线程去减少线程数量
+            if (FINISHED == CURRENTTHREADCOUNT)
+            {
+                pthread_cond_signal(&cond_notify_becauseoflow); // 任务减少，可能会导致低于低潮所以需要通知线程去判断
+                FINISHED = 0;
             }
             number--;
         }
