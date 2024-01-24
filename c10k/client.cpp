@@ -16,7 +16,7 @@ int main(int argc, char* argv[])
 
     raddr.sin_family = AF_INET;
     raddr.sin_port = htons(8888);
-    inet_pton(AF_INET, "192.168.1.236", &raddr.sin_addr.s_addr);
+    inet_pton(AF_INET, "192.168.1.89", &raddr.sin_addr.s_addr);
 
 
     for (int i = 0; i < 1000; i++) // 创建10个客户端去连接服务器
