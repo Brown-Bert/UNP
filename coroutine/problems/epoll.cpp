@@ -20,9 +20,10 @@
 
 #include "mythreadspoll.h"
 
-#define SERPORT 8888
-#define POLLSIZE 1020
-#define REVENTSSIZE 1024
+#define SERPORT 8888   // 服务器端口
+#define POLLSIZE 1020  // 线程池大小
+#define REVENTSSIZE \
+  604857  // 事件个数，事件返回集合是监听的所有描述符所发生的事件，所以最大个数是程序能容纳的所有文件描述符的个数
 #define FLAG false  // true表示使用线程进行异步通信 false同步通信
 
 // 初始化线程池
@@ -32,7 +33,7 @@ int main(int argc, char *argv[]) {
   int socket_fd;
   socklen_t val = 1;
   sockaddr_in laddr, raddr;
-  pollptr = new ThreadsPoll;
+  pollptr = new ThreadsPoll(10);
 
 #if FLAG
   pollptr->createPoll();

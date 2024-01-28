@@ -24,7 +24,7 @@
 #define my_size_t int
 #define DEFAULTNUM 4
 #define TASKSMAXSIZE \
-  50  // 一个进程所拥有的文件描述符列表（一般系统资源中默认打开的文件时1024）
+  604857  // 一个进程所拥有的文件描述符列表（一般早期系统资源中默认打开的文件时1024，现代拥有更高）
 #define BUFSIZE 1024
 class ThreadsPoll;
 extern ThreadsPoll *pollptr;
@@ -143,10 +143,10 @@ class ThreadsPoll {
         // 本轮处理中并没有收到对方的请求关闭的通知，但是本轮数据没有了也需要跳出循环
         // std::cout << "errno = " << errno << std::endl;
         if (errno == EWOULDBLOCK) {
-          std::cout << "没有数据" << std::endl;
+          // std::cout << "没有数据" << std::endl;
           errno = 0;
         } else if (errno == 9) {
-          std::cout << "操作一个已经关闭或本身就不存在的描述字" << std::endl;
+          // std::cout << "操作一个已经关闭或本身就不存在的描述字" << std::endl;
           errno = 0;
         }
         break;
@@ -194,7 +194,7 @@ class ThreadsPoll {
           if (std::stoi(num) == 1) {
             // 开始计时
             // 获取当前时间点
-            std::cout << "开始测试时间" << std::endl;
+            // std::cout << "开始测试时间" << std::endl;
             start_time = std::chrono::high_resolution_clock::now();
             // break;
           } else if (std::stoi(num) == 0) {
@@ -208,7 +208,7 @@ class ThreadsPoll {
             // 输出耗时（以微秒为单位）
             std::cout << "Elapsed time: " << duration.count() << " microseconds"
                       << std::endl;
-            std::cout << "结束测试时间" << std::endl;
+            // std::cout << "结束测试时间" << std::endl;
             // break;
           } else {
             std::this_thread::sleep_for(dura);
@@ -259,7 +259,7 @@ class ThreadsPoll {
     // 为每个线程收尸
     for (std::thread &t : poll) {
       t.join();
-      std::cout << "终止线程" << std::endl;
+      // std::cout << "终止线程" << std::endl;
     }
     // closeT.join();
     exit(0);
