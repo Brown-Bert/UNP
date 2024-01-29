@@ -29,6 +29,35 @@
 class ThreadsPoll;
 extern ThreadsPoll *pollptr;
 
+typedef struct {
+  void *esp;
+  void *ebp;
+  void *eip;
+  void *edi;
+  void *esi;
+  void *ebx;
+  void *r1;
+  void *r2;
+  void *r3;
+  void *r4;
+  void *r5;
+} context;
+
+struct coroutine {
+  my_size_t fd;
+  context ctx;         // 上下文
+  void *func(void *);  // 协程入口函数
+  void *param;         // 入口函数的参数
+
+  void *stack;           // 协程的栈指针
+  my_size_t stack_size;  // 栈大小
+
+  unsigned int status;  // 状态 ready running defer wait
+  // queue_node(coroutinr) ready_node;
+  // rbtree_node(coroutine) defer_node;
+  // rbtree_node(coroutine) wait_node;
+};
+
 class ThreadsPoll {
  private:
   // 任务队列，用于存放任务（就是套接字描述符，服务器负责接收把任务放进队列，然后通知线程中的某个线程去任务队列中拿任务执行和客户端的通信）
@@ -149,6 +178,9 @@ class ThreadsPoll {
           // std::cout << "操作一个已经关闭或本身就不存在的描述字" << std::endl;
           errno = 0;
         }
+        // epoll_ctl(epollfd, EPOLL_CTL_DEL, fd, NULL); //
+        // 删除epoll实例对其的监测
+        close(fd);
         break;
       }
 
