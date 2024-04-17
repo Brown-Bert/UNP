@@ -1,4 +1,6 @@
 cmake_minimum_required(VERSION 3.0.0)
 project(Coroutine)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-add_subdirectory(coroutine)
+include_directories(${CMAKE_SOURCE_DIR}/include/)
+# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fcoroutines")
+add_subdirectory(repeater)
