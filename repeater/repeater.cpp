@@ -1,6 +1,7 @@
 #include "repeater.h"
 
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <sys/epoll.h>
@@ -12,6 +13,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <iostream>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -122,19 +124,40 @@ void Client::setIpAndPort() {
 }
 
 void Client::sendMessage(std::string desIp, my_int desPort, std::string msg) {
+  // 如果消息够长，则会造成缓冲区溢出，而且自己定义的数据结构在接收方并不能按照预计的那样去读取，
+  // 所以需要将具体的消息手动切片或者补齐
   // 发送信息
   Message message;
   message.sourceIp = ip;
   message.sourcePort = port;
   message.desIp = desIp;
   message.desPort = desPort;
-  message.message = msg;
-  // 如果消息够长，则会造成缓冲区溢出，而且自己定义的数据结构在接收方并不能按照预计的那样去读取，所以需要将具体的消息手动切片或者补齐
-  // 将结构体序列化
-  char buf[BUFSIZE];
-  // memcpy(buf, &message, sizeof(message));
-  serializeStruct(message, buf);
-  write(socket_d, buf, sizeof(buf));
+  int len = BUFSIZE -
+            (sizeof(ip) + sizeof(port) + sizeof(desIp) + sizeof(desPort) + 1);
+  while (true) {
+    if (msg.size() > len) {
+      std::cout << "进入" << std::endl;
+      message.message = msg.substr(0, len);
+      msg = msg.substr(len);
+      // 将结构体序列化
+      char buf[BUFSIZE];
+      // memcpy(buf, &message, sizeof(message));
+      serializeStruct(message, buf);
+      buf[BUFSIZE - 1] = '\0';
+      write(socket_d, buf, BUFSIZE);
+      // send(socket_d, buf, BUFSIZE, 0);
+    } else {
+      message.message = msg;
+      // 将结构体序列化
+      char buf[BUFSIZE];
+      // memcpy(buf, &message, sizeof(message));
+      serializeStruct(message, buf);
+      buf[BUFSIZE - 1] = '\0';
+      write(socket_d, buf, BUFSIZE);
+      // send(socket_d, buf, BUFSIZE, 0);
+      break;
+    }
+  }
 }
 
 void RelayServer::searchThread() {
@@ -244,147 +267,111 @@ void RelayServer::myConnect(my_int fd, std::string desIp, my_int desPort) {
 std::mutex mutex_infos;
 std::mutex mutex_epollfd;
 std::mutex mutex_task;
-std::mutex mutex_server;
 
-void RelayServer::coroutineFunction(char *strs, my_int len, my_int fd) {
+void RelayServer::coroutineFunction(char *strs, my_int fd) {
   // while (true) {
-  std::cout << "len = " << len << std::endl;
-  char buf[BUFSIZE];
-  memcpy(buf, strs, BUFSIZE);
-  if (len == 0) {
-    // std::cout << "errno = " << errno << std::endl;
-    // 客户端请求关闭，关闭客户端的套接字描述符，同时也要向服务器请求关闭，还要关闭停留在中继服务器的红黑树中的结构体信息
-    // 如果与fd相关的任务还没有执行完成，则不能进行关闭套接字描述符的操作
+  int closeFlag = 0;
+  // 检查套接字的FIN标志位，是否产生粘包
+  // struct tcp_info tcpinfo;
+  // socklen_t lent = sizeof(tcpinfo);
+  // if (getsockopt(fd, IPPROTO_TCP, TCP_INFO, &tcpinfo, &lent) < 0) {
+  //   perror("getsockopt()x");
+  //   exit(-1);
+  // }
+  // bool finFlag = (tcpinfo.tcpi_state == TCP_CLOSE);
+  // if (finFlag) {
+  //   std::cout << "标志位被设置了" << std::endl;
+  // }
+
+  // 真正在传输数据
+  Message message;
+  // memcpy(&message, buf, sizeof(Message));
+  deserializeStruct(strs, message);
+  // 在红黑树中查找信息，如果不存在就需要构建信息，并放入到红黑树中
+  auto it = infos.find(std::to_string(fd));
+  my_int sendfd;
+  if (it == infos.end()) {
+    // 表明在红黑树中没有查到，就需要构造一个消息节点
+    Info info;
+    info.desIp = message.desIp;
+    info.desPort = message.desPort;
+    info.socket_d =
+        createSocket(info.desIp, info.desPort, 0);  // 创建之后发出连接请求
+    sendfd = info.socket_d;
+    myConnect(sendfd, info.desIp, info.desPort);
+    // 构造套接字
+    {
+      std::unique_lock<std::mutex> lock(mutex_infos);
+      infos[std::to_string(fd)] = info;  // 把节点信息加入到红黑树中
+      // Info *info1 = new Info;
+      // infos["1"] = *info1;
+      // infos.insert(std::make_pair(std::to_string(fd), info));
+    }
+    // std::cout << getpid() << std::endl;
+  } else {
+    // 表明在红黑树中已经存在节点了
+    sendfd = it->second.socket_d;
+  }
+  // 查询servers的信息
+  auto s = servers.find(std::to_string(message.desPort));
+#if FLAG
+  auto ele = std::find(s->second.begin(), s->second.end(), std::to_string(fd));
+  if (ele == s->second.end()) {
+    // 表明没有找到，添加进去
+    s->second.push_back(std::to_string(fd));
+  }
+  // 转发消息
+  std::cout << "转发数据到" << sendfd << std::endl;
+  write(sendfd, strs, BUFSIZE);
+  delete strs;
+  // send(sendfd, strs, BUFSIZE, 0);
+  // 任务处理完成减少fd相关的任务数量记录
+  {
+    std::unique_lock<std::mutex> lock(mutex_task);
     // 记录套接字相关的任务数
     // 先查询fd_tasks中是不是已经存在fd
     auto it = fd_tasks.find(fd);
-    // std::cout << "空转/////" << it->second << std::endl;
-    while (it->second["number"] != 0) {
-      // 表明还有任务没有执行完成不能执行关闭操作
-      std::cout << "空转" << it->second["number"] << std::endl;
-      sleep(5);  // 暂时让其5s空转一次
+    it->second["number"]--;
+    if (it->second["isclose"] == 1) {
+      closeFlag = 1;
+      it->second["isclose"] = 0;
     }
-    {
-      std::unique_lock<std::mutex> lock(mutex_task);
-      // 修改fd_tasks中的记录
-      it->second["number"] = -1;
-      it->second["state"] = 1;
-    }
-    std::cout << "客户端请求关闭" << std::endl;
-    close(fd);
-    auto its = infos.find(std::to_string(fd));
-    // 向真正的服务器请求关闭
-    close(its->second.socket_d);
-    {
-      std::unique_lock<std::mutex> lock(mutex_infos);
-      infos.erase(its);
-    }
-    {
-      std::unique_lock<std::mutex> lock(mutex_epollfd);
-      epoll_ctl(epollfd, EPOLL_CTL_DEL, fd,
-                NULL);  // 把要监听的客户端套接字描述符从epoll实例中剔除
-    }
-    // 删除servers中客户端
-    auto s = servers.find(std::to_string(its->second.desPort));
-    auto ele =
-        std::find(s->second.begin(), s->second.end(), std::to_string(fd));
-    s->second.erase(ele);
-  } else if (len < 0) {
-    std::cout << "errno = " << errno << std::endl;
-    perror("read()");
-    exit(-1);
-    // std::cout << "操作一个已经关闭或本身就不存在的描述字" << std::endl;
-    // auto it = infos.find(std::to_string(fd));
-    // close(it->second.socket_d);
-    // {
-    //   std::unique_lock<std::mutex> lock(mutex_infos);
-    //   infos.erase(it);
-    // }
-  } else {
-    // 检查套接字的FIN标志位，是否产生粘包
-    // struct tcp_info tcpinfo;
-    // socklen_t lent = sizeof(tcpinfo);
-    // if (getsockopt(fd, IPPROTO_TCP, TCP_INFO, &tcpinfo, &lent) < 0) {
-    //   perror("getsockopt()x");
-    //   exit(-1);
-    // }
-    // bool finFlag = (tcpinfo.tcpi_state == TCP_CLOSE);
-    // if (finFlag) {
-    //   std::cout << "标志位被设置了" << std::endl;
-    // }
-
-    // 真正在传输数据
-    Message message;
-    // memcpy(&message, buf, sizeof(Message));
-    deserializeStruct(buf, message);
-    // 在红黑树中查找信息，如果不存在就需要构建信息，并放入到红黑树中
-    auto it = infos.find(std::to_string(fd));
-    my_int sendfd;
-    std::cout << "asdfg" << std::endl;
-    if (it == infos.end()) {
-      // 表明在红黑树中没有查到，就需要构造一个消息节点
-      Info info;
-      info.desIp = message.desIp;
-      info.desPort = message.desPort;
-      info.socket_d =
-          createSocket(info.desIp, info.desPort, 0);  // 创建之后发出连接请求
-      sendfd = info.socket_d;
-      myConnect(sendfd, info.desIp, info.desPort);
-      // 构造套接字
-      {
-        std::unique_lock<std::mutex> lock(mutex_infos);
-        infos[std::to_string(fd)] = info;  // 把节点信息加入到红黑树中
-        // Info *info1 = new Info;
-        // infos["1"] = *info1;
-        // infos.insert(std::make_pair(std::to_string(fd), info));
-      }
-      // std::cout << getpid() << std::endl;
-    } else {
-      // 表明在红黑树中已经存在节点了
-      sendfd = it->second.socket_d;
-    }
-    std::cout << "sdg" << std::endl;
-    // my_int port = it->second.desPort;
-    // 查询servers的信息
-    auto s = servers.find(std::to_string(message.desPort));
-#if FLAG
-    auto ele =
-        std::find(s->second.begin(), s->second.end(), std::to_string(fd));
-    if (ele == s->second.end()) {
-      // 表明没有找到，添加进去
-      s->second.push_back(std::to_string(fd));
-    }
+  }
+#else
+  if (s->second.empty()) {
+    // 表明这台服务器还没有人连接可以连接
+    s->second.push_back(std::to_string(fd));
     // 转发消息
-    std::cout << "转发数据" << std::endl;
-    write(sendfd, buf, BUFSIZE);
-    // 任务处理完成减少fd相关的任务数量记录
+    write(sendfd, buf, sizeof(buf));
     {
       std::unique_lock<std::mutex> lock(mutex_task);
       // 记录套接字相关的任务数
       // 先查询fd_tasks中是不是已经存在fd
       auto it = fd_tasks.find(fd);
-      it->second["number"]--;
-      std::cout << "sgsd = " << it->second["number"] << std::endl;
+      it->second--;
     }
-#else
-    if (s->second.empty()) {
-      // 表明这台服务器还没有人连接可以连接
-      s->second.push_back(std::to_string(fd));
-      // 转发消息
-      write(sendfd, buf, sizeof(buf));
-      {
-        std::unique_lock<std::mutex> lock(mutex_task);
-        // 记录套接字相关的任务数
-        // 先查询fd_tasks中是不是已经存在fd
-        auto it = fd_tasks.find(fd);
-        it->second--;
-      }
-    } else {
-      // 表明这台服务器已经建立了连接不能再次建立连接
-      // 把任务再次放入到任务池中
-      relay.threadPool->enqueue(coroutineFunction, fd, relay);
-    }
+  } else {
+    // 表明这台服务器已经建立了连接不能再次建立连接
+    // 把任务再次放入到任务池中
+    relay.threadPool->enqueue(coroutineFunction, fd, relay);
+  }
 #endif
+  // 判断是不是要执行关闭
+  if (closeFlag) {
+    auto its = infos.find(std::to_string(fd));
+    // 向真正的服务器请求关闭
+    std::cout << "线程中真正关闭" << std::endl;
+    close(its->second.socket_d);
+    {
+      std::unique_lock<std::mutex> lock(mutex_infos);
+      infos.erase(its);
+    }
+    close(fd);
+    // 删除servers中客户端
+    auto s = servers.find(std::to_string(its->second.desPort));
+    auto ele =
+        std::find(s->second.begin(), s->second.end(), std::to_string(fd));
+    s->second.erase(ele);
   }
   // }
 }
@@ -438,27 +425,81 @@ void RelayServer::recvMsg() {
         char ip[16];
         inet_ntop(AF_INET, &raddr.sin_addr.s_addr, ip, sizeof(ip));
         printf("client : %s, port : %d\n", ip, ntohs(raddr.sin_port));
-        if (newsd < 0) {
-          perror("accept()");
-          close(socket_d);
-          exit(-1);
-        }
 
         // 把socket_d套接口设置成非阻塞模式
         my_int flags = fcntl(newsd, F_GETFL, 0);
         fcntl(newsd, F_SETFL, flags | O_NONBLOCK);
         event.data.fd = newsd;
-        event.events = EPOLLIN | EPOLLET;
+        event.events = EPOLLIN;
         epoll_ctl(epollfd, EPOLL_CTL_ADD, newsd, &event);
         // }
       } else {
         // 表明是已经建立的连接要通信，而不是客户端请求连接
-        // std::cout << "添加任务 " << fd << std::endl;
+        // 把数据读出来
         char buf[BUFSIZE];
+        // int len = read(fd, buf, BUFSIZE);
+        int len = 0;
+        // 持续读取数据，知道读取BUfSIZE大小的数据
         while (true) {
-          my_int len = read(fd, buf, BUFSIZE);
-          // std::cout << "len = " << len << std::endl;
-          if (len < 0) break;
+          if (len == BUFSIZE) {
+            // 表明数据读取完毕
+            break;
+          }
+          len += read(fd, buf + len, BUFSIZE - len);
+        }
+        if (len == 0) {
+          // 表明客户端请求关闭
+          auto it = fd_tasks.find(fd);
+          if (it == fd_tasks.end()) {
+            std::cout << "出现异常情况" << std::endl;
+          }
+          {
+            std::unique_lock<std::mutex> lock(mutex_task);
+            // 修改fd_tasks中的记录
+            if (it->second["number"] > 0) {
+              // 表明这个请求关闭的套接字还有其他任务没有完成
+              it->second["isclose"] = 1;
+              it->second["state"] = 0;
+              {
+                std::unique_lock<std::mutex> lock(mutex_epollfd);
+                if (epoll_ctl(epollfd, EPOLL_CTL_DEL, fd,
+                              NULL) <
+                    0) {  // 把要监听的客户端套接字描述符从epoll实例中剔除
+                  std::cerr << "删除失败" << std::endl;
+                }
+              }
+            } else {
+              // 就在epoll中执行关闭
+              std::cout << "epoll中真正关闭" << std::endl;
+              it->second["state"] = 0;
+              auto its = infos.find(std::to_string(fd));
+              // 向真正的服务器请求关闭
+              close(its->second.socket_d);
+              {
+                std::unique_lock<std::mutex> lock(mutex_infos);
+                infos.erase(its);
+              }
+              {
+                std::unique_lock<std::mutex> lock(mutex_epollfd);
+                if (epoll_ctl(epollfd, EPOLL_CTL_DEL, fd,
+                              NULL) <
+                    0) {  // 把要监听的客户端套接字描述符从epoll实例中剔除
+                  std::cerr << "删除失败" << std::endl;
+                }
+              }
+              close(fd);
+              // 删除servers中客户端
+              auto s = servers.find(std::to_string(its->second.desPort));
+              auto ele = std::find(s->second.begin(), s->second.end(),
+                                   std::to_string(fd));
+              s->second.erase(ele);
+            }
+          }
+          puts("客户端请求关闭");
+        } else if (len < 0) {
+          std::cout << "epoll读取异常" << std::endl;
+        } else {
+          // std::cout << "添加任务 " << fd << std::endl;
           // 把任务加入任务队列
           // 记录套接字相关的任务数
           // 先查询fd_tasks中是不是已经存在fd
@@ -468,29 +509,28 @@ void RelayServer::recvMsg() {
             if (it == fd_tasks.end()) {
               // 表明fd_tasks中不存在fd，需要新建
               std::map<std::string, my_int> m;
-              m["number"] = 0;
+              m["number"] = 1;
               m["state"] = 1;
+              m["isclose"] = 0;
               fd_tasks[fd] = m;
             } else {
               // 表明存在fd，需要判断fd是不是可重用的
-              while (true) {
-                if (it->second["state"] == 1) {
-                  // 表明状态是可用的
-                  it->second["number"]++;
-                  break;
-                }
-                sleep(5);
+              if (it->second["state"] == 1) {
+                // 表明状态是可用的
+                it->second["number"]++;
+              } else {
+                // 不可重用（此种情况是已经被用过，但是用完了）
+                it->second["state"] = 1;
+                it->second["number"] = 1;
+                it->second["isclose"] = 0;
               }
             }
           }
-          threadPool->enqueue([this, buf, len, fd]() mutable {
-            coroutineFunction(buf, len, fd);
+          char *tmp = new char[BUFSIZE];
+          memcpy(tmp, buf, BUFSIZE);
+          threadPool->enqueue([this, strs = tmp, tmpfd = fd]() mutable {
+            coroutineFunction(strs, tmpfd);
           });
-          if (len == 0) {
-            auto it = fd_tasks.find(fd);
-            it->second["state"] = 0;
-            break;
-          }
         }
       }
     }
@@ -521,53 +561,31 @@ void Server::createSocket() {
   }
 }
 
-void Server::recvTask(char *strs, my_int len, my_int fd) {
+void Server::recvTask(char *strs, my_int fd) {
   // while (true) {
-  // puts(buf);
-  char buf[BUFSIZE];
-  memcpy(buf, strs, BUFSIZE);
-  if (len == 0) {
-    // std::cout << "errno = " << errno << std::endl;
-    // 客户端请求关闭，关闭客户端的套接字描述符，同时也要向服务器请求关闭，还要关闭停留在中继服务器的红黑树中的结构体信息
+  int closeFlag = 0;
+  // 真正在传输数据
+  // std::cout << "数据" << std::endl;
+  Message message;
+  deserializeStruct(strs, message);
+  // 消息解析完成
+  delete strs;
+  // 输出消息
+  // std::chrono::milliseconds dura(
+  //     std::stoi(message.message));  // 休眠的时间是num毫秒
+  std::cout << "接收到来自" << message.sourcePort << "的消息" << std::endl;
+  // std::cout << "dura" << message.message << std::endl;
+  // std::this_thread::sleep_for(dura);
+  {
+    std::unique_lock<std::mutex> lock(mutex_task);
     auto it = fd_tasks.find(fd);
-    while (it->second["number"] != 0) {
-      // 表明还有任务没有执行完成不能执行关闭操作
-      std::cout << "空转" << it->second["number"] << std::endl;
-      sleep(5);  // 暂时让其5s空转一次
-    }
-    {
-      std::unique_lock<std::mutex> lock(mutex_server);
-      it->second["number"] = -1;
-      it->second["state"] = 1;
-    }
-    puts("中继器请求关闭");
-    close(fd);
-    {
-      std::unique_lock<std::mutex> lock(mutex_epollfd);
-      epoll_ctl(epollfd, EPOLL_CTL_DEL, fd,
-                NULL);  // 把要监听的客户端套接字描述符从epoll实例中剔除
-    }
-  } else if (len < 0) {
-    perror("read()");
-    exit(-1);
-    // std::cout << "操作一个已经关闭或本身就不存在的描述字" << std::endl;
-  } else {
-    // 真正在传输数据
-    // std::cout << "数据" << std::endl;
-    Message message;
-    deserializeStruct(buf, message);
-    // 输出消息
-    std::chrono::milliseconds dura(
-        std::stoi(message.message));  // 休眠的时间是num毫秒
-    puts(message.message.c_str());
-    std::cout << "dura" << message.message << std::endl;
-    std::this_thread::sleep_for(dura);
-    {
-      std::unique_lock<std::mutex> lock(mutex_server);
-      auto it = fd_tasks.find(fd);
-      it->second["number"]--;
+    it->second["number"]--;
+    if (it->second["isclose"] == 1) {
+      closeFlag = 1;
+      it->second["isclose"] = 0;
     }
   }
+  if (closeFlag) close(fd);
   // }
 }
 
@@ -624,61 +642,87 @@ void Server::recvMessage() {
         my_int flags = fcntl(newsd, F_GETFL, 0);
         fcntl(newsd, F_SETFL, flags | O_NONBLOCK);
         event.data.fd = newsd;
-        event.events = EPOLLIN | EPOLLET;
+        event.events = EPOLLIN;
         epoll_ctl(epollfd, EPOLL_CTL_ADD, newsd, &event);
         // }
       } else {
         // 表明是已经建立的连接要通信，而不是客户端请求连接
 
         char buf[BUFSIZE];
+        int len = 0;
+        // 持续读取数据，知道读取BUfSIZE大小的数据
         while (true) {
-          my_int len = read(fd, buf, BUFSIZE);
-          std::cout << "len = " << len << std::endl;
-          if (len < 0) break;
+          if (len == BUFSIZE) {
+            // 表明数据读取完毕
+            break;
+          }
+          len += read(fd, buf + len, BUFSIZE - len);
+        }
+        if (len == 0) {
+          // 表明客户端请求关闭
+          auto it = fd_tasks.find(fd);
+          if (it == fd_tasks.end()) {
+            std::cout << "出现异常情况yyy" << std::endl;
+          }
+          {
+            std::unique_lock<std::mutex> lock(mutex_task);
+            // 修改fd_tasks中的记录
+            if (it->second["number"] > 0) {
+              // 表明这个请求关闭的套接字还有其他任务没有完成
+              it->second["isclose"] = 1;
+              it->second["state"] = 0;
+              {
+                std::unique_lock<std::mutex> lock(mutex_epollfd);
+                epoll_ctl(
+                    epollfd, EPOLL_CTL_DEL, fd,
+                    NULL);  // 把要监听的客户端套接字描述符从epoll实例中剔除
+              }
+            } else {
+              // 可以在此线程中执行关闭
+              it->second["state"] = 0;
+              {
+                std::unique_lock<std::mutex> lock(mutex_epollfd);
+                epoll_ctl(
+                    epollfd, EPOLL_CTL_DEL, fd,
+                    NULL);  // 把要监听的客户端套接字描述符从epoll实例中剔除
+              }
+              close(fd);
+            }
+          }
+          puts("中继器请求关闭");
+        } else if (len < 0) {
+          std::cout << "epoll读取异常" << std::endl;
+        } else {
+          // while (true) {
           // 把任务加入任务队列
           // 先查询fd_tasks中是不是已经存在fd
           // std::cout << "进入" << std::endl;
           {
-            std::unique_lock<std::mutex> lock(mutex_server);
+            std::unique_lock<std::mutex> lock(mutex_task);
             auto it = fd_tasks.find(fd);
             if (it == fd_tasks.end()) {
               // 表明fd_tasks中不存在fd，需要新建
               std::map<std::string, my_int> m;
-              m["number"] = 0;
+              m["number"] = 1;
               m["state"] = 1;
-              puts("as");
-              fd_tasks.insert(std::make_pair(fd, m));
+              m["isclose"] = 0;
+              fd_tasks[fd] = m;
             } else {
               // 表明存在fd，需要判断fd是不是可重用的
-              while (true) {
-                if (it->second["state"] == 1) {
-                  // 表明状态是可用的
-                  it->second["number"]++;
-                  break;
-                }
-                std::cout << "暂时不可用" << std::endl;
-                sleep(5);
+              if (it->second["state"] == 1) {
+                // 表明状态是可用的
+                it->second["number"]++;
+              } else {
+                it->second["state"] = 1;
+                it->second["number"] = 1;
+                it->second["isclose"] = 0;
               }
             }
-            // puts("13579");
-            // auto a = it->second.find("number");
-            // if (a == it->second.end()) {
-            //   std::cout << "空的" << std::endl;
-            // }
-            it = fd_tasks.find(fd);
-            std::cout << "任务 = " << it->second["number"] << std::endl;
           }
-          threadPool->enqueue([this, buf, len, fd]() mutable {
-            // char strs[BUFSIZE];
-            // strcpy(strs, buf);
-            recvTask(buf, len, fd);
-          });
-          if (len == 0) {
-            auto it = fd_tasks.find(fd);
-            // 修改状态
-            it->second["state"] = 0;
-            break;
-          }
+          char *tmp = new char[BUFSIZE];
+          memcpy(tmp, buf, BUFSIZE);
+          threadPool->enqueue(
+              [this, strs = tmp, fd]() mutable { recvTask(strs, fd); });
         }
       }
     }

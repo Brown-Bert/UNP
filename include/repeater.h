@@ -3,19 +3,19 @@
 
 #include <unistd.h>
 
-#include <boost/coroutine2/coroutine.hpp>
+// #include <boost/coroutine2/coroutine.hpp>
 #include <cstdlib>
 #include <memory>
 #include <string>
 
 #include "threadPool.h"
 #define my_int int
-#include <boost/coroutine2/all.hpp>
+// #include <boost/coroutine2/all.hpp>
 #include <iostream>
 #include <map>
 #include <vector>
 
-#include "coroutine.h"
+// #include "coroutine.h"
 #define SERVERIP "127.0.0.1"  // 中继器ip
 #define SERVERPORT 8888       // 中继器端口
 #define REVENTSSIZE 1024
@@ -24,7 +24,6 @@
 #define serverNum 10          // 开启100台服务器
 #define serverIp "127.0.0.1"  // 暂时只考虑所有服务器的ip相同
 #define searchPort 9999
-#define MTU 1500  // 最大传输单元
 #define FLAG \
   true  // true : 允许服务器接收来自多个客户端的连接请求 false :
         // 不允许服务器接收多个客户端的请求
@@ -93,7 +92,7 @@ class RelayServer {
       my_int threadNum);  // 创建线程池, threadNum 线程池初始化时的线程个数
   void
   searchThread();  // 中继服务器上创建一个线程，用于返回给特定请求中继服务器管理的客户端与服务器的情况以及详细信息
-  void coroutineFunction(char* strs, my_int len, my_int fd);
+  void coroutineFunction(char* strs, my_int fd);
   void myConnect(my_int fd, std::string desIp,
                  my_int desPort);  // 连接远程服务器
 };
@@ -113,7 +112,7 @@ class Server {
   ~Server() { free(threadPool); }
   Server(my_int port, std::string ip) : ip(ip), port(port){};
   void createSocket();  // 创建客户端网络套接字描述符
-  void recvTask(char* strs, my_int len, my_int fd);
+  void recvTask(char* strs, my_int fd);
   void recvMessage();  // 运行客户端并发送消息，msg:具体要发送的消息
   std::map<my_int, std::map<std::string, my_int>>
       fd_tasks;  // 因为多线程操作同一个描述符，会造成其他线程在处理任务的时候，有一个线程已经接收到了关闭套接字描述符的任务

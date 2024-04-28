@@ -3,35 +3,56 @@
 #include <chrono>
 #include <iostream>
 #include <random>
+#include <string>
 #include <thread>
+#include <vector>
 
 #include "repeater.h"
 
+std::string ConstructStringWithByteSize(std::size_t size) {
+  std::vector<char> charVector(size, 'a');
+  return std::string(charVector.begin(), charVector.end()) + '\0';
+}
+
 int main(int argc, char* argv[]) {
   // 构造1000个客户端给100个服务器发送消息
+  if (argc < 3) {
+    std::cerr << "参数有问题" << std::endl;
+    return 0;
+  }
   my_int startPort = serverPortStart;
-  for (int i = 0; i < 20; i++) {
-    Client client(i);
-    client.createSocket();
-    client.setIpAndPort();
-    // 创建随机数引擎
-    std::random_device rd;
-    std::mt19937 gen(rd());  // 使用随机设备生成种子
-    // std::mt19937 gen(123); // 或者使用固定种子
-    // 创建分布对象，指定随机数范围
-    std::uniform_int_distribution<int> dist(10,
-                                            200);  // 产生 1 到 100 之间的整数
-    // 生成随机数
-    int randomNum = dist(gen);
-    std::string str = std::to_string(randomNum);
-    if (startPort >= (serverPortStart + serverNum)) {
+  int clientNum = std::stoi(argv[1]);
+  int byteSize = std::stoi(argv[2]);  // 传输的字节大小，单位值B
+  // 输出
+  std::cout << "clientNum: " << clientNum << std::endl;
+  std::cout << "byteSize: " << byteSize << std::endl;
+  std::vector<std::thread> handlers;
+  for (int i = 0; i < clientNum; i++) {
+    handlers.push_back(std::thread([=]() {
+      Client client(i);
+      client.createSocket();
+      // sleep(2);
+      client.setIpAndPort();
+      std::string str = ConstructStringWithByteSize(byteSize);
+      while (true) {
+        client.sendMessage(serverIp, startPort, str);
+        // sleep(1);
+      }
+      // std::cout << i << std::endl;
+      // std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      // sleep(2);
+      client.closefd();  // 关闭套接字描述符
+    }));
+    std::cout << "几遍 = " << handlers.size() << std::endl;
+    if (startPort > (serverPortStart + serverNum - 1)) {
       startPort = serverPortStart;
     }
-    client.sendMessage(serverIp, startPort, str);
-    std::cout << i << std::endl;
     startPort++;
-    // std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    client.closefd();  // 关闭套接字描述符
   }
+  for (auto& t : handlers) {
+    std::cout << "join" << std::endl;
+    t.join();
+  }
+  std::cout << "结束" << std::endl;
   return 0;
 }
