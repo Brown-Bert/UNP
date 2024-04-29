@@ -23,7 +23,7 @@
 #include <vector>
 
 #include "threadPool.h"
-ThreadPool* RelayThreadPool;
+ThreadPool *RelayThreadPool;
 
 /**
   std::string sourceIp;  // 发送消息方的ip
@@ -62,11 +62,19 @@ void serializeStruct(const Message &message, char *buffer) {
   memcpy(buffer, &messageLength, sizeof(int));
   buffer += sizeof(int);
   memcpy(buffer, message.message.c_str(), messageLength);
+  buffer += messageLength;
+
+  // 序列化包的大小
+  memcpy(buffer, &message.packageSize, sizeof(int));
+  buffer += sizeof(int);
+
+  // 序列化包的编号
+  memcpy(buffer, &message.packageNum, sizeof(int));
+  buffer += sizeof(int);
 }
 
 // 反序列化字节流为结构体
-const char* deserializeStruct(const char *buffer, Message &message) {
-
+const char *deserializeStruct(const char *buffer, Message &message) {
   // 暂存buffer的指针
   const char *tmp = buffer;
   // 反序列化发送方字符串成员的长度和字符数据
@@ -95,6 +103,15 @@ const char* deserializeStruct(const char *buffer, Message &message) {
   memcpy(&messageLength, buffer, sizeof(int));
   buffer += sizeof(int);
   message.message.assign(buffer, messageLength);
+  buffer += messageLength;
+
+  // 反序列化接收方的包大小
+  memcpy(&message.packageSize, buffer, sizeof(int));
+  buffer += sizeof(int);
+
+  // 反序列化接收方的包编号
+  memcpy(&message.packageNum, buffer, sizeof(int));
+  buffer += sizeof(int);
 
   return tmp;
 }
@@ -141,11 +158,15 @@ void Client::sendMessage(std::string desIp, my_int desPort, std::string msg) {
   message.sourcePort = port;
   message.desIp = desIp;
   message.desPort = desPort;
-  int len = BUFSIZE -
-            (sizeof(ip) + sizeof(port) + sizeof(desIp) + sizeof(desPort) + 1);
+  message.packageSize = msg.size();
+  int len =
+      BUFSIZE - (sizeof(ip) + sizeof(port) + sizeof(desIp) + sizeof(desPort) +
+                 sizeof(message.packageSize) + sizeof(message.packageNum) + 1);
+  int count = 0;
   while (true) {
     if (msg.size() > len) {
-      std::cout << "进入" << std::endl;
+      message.packageNum = count;
+      count++;
       message.message = msg.substr(0, len);
       msg = msg.substr(len);
       // 将结构体序列化
@@ -157,6 +178,7 @@ void Client::sendMessage(std::string desIp, my_int desPort, std::string msg) {
       // send(socket_d, buf, BUFSIZE, 0);
     } else {
       message.message = msg;
+      message.packageNum = count;
       // 将结构体序列化
       char buf[BUFSIZE] = {'\0'};
       // memcpy(buf, &message, sizeof(message));
@@ -193,9 +215,9 @@ void RelayServer::searchThread() {
   }
   socklen_t len = sizeof(raddr);
   std::cout << "查询线程启动" << std::endl;
-  while (true){
+  while (true) {
     my_int newsd = accept(socket_d, (struct sockaddr *)&raddr, &len);
-    if (newsd < 0){
+    if (newsd < 0) {
       close(socket_d);
       int state = -1;
       std::cout << "查询线程关闭" << std::endl;
@@ -207,7 +229,7 @@ void RelayServer::searchThread() {
     char buf[BUFSIZE];
     while (true) {
       int len = read(newsd, buf, BUFSIZE);
-      if (len == 0){
+      if (len == 0) {
         // 表明对方请求关闭
         std::cout << "查询客户端请求关闭" << std::endl;
         close(newsd);
@@ -216,7 +238,7 @@ void RelayServer::searchThread() {
       // 返回信息
       // 将 map 序列化为字节流
       std::string str(buf);
-      if (str == "close"){
+      if (str == "close") {
         // 表明对方请求关闭线程
         close(socket_d);
         std::cout << "查询线程关闭" << std::endl;
@@ -503,14 +525,14 @@ void RelayServer::recvMsg() {
         // 持续读取数据，知道读取BUfSIZE大小的数据
         while (len < BUFSIZE) {
           n = read(fd, buf + len, BUFSIZE - len);
-          if (n < 0){
-            if (errno == EWOULDBLOCK){
+          if (n < 0) {
+            if (errno == EWOULDBLOCK) {
               // 表明没有数据可读取，非阻塞IO立即返回
               continue;
             }
             perror("持续读取错误");
             break;
-          }else if (n == 0){
+          } else if (n == 0) {
             perror("持续读取到结尾");
             break;
           }
@@ -641,12 +663,52 @@ void Server::recvTask(char *strs, my_int fd) {
   auto deletePointer = deserializeStruct(strs, message);
   // 消息解析完成
   delete[] deletePointer;
-  // 输出消息
-  // std::chrono::milliseconds dura(
-  //     std::stoi(message.message));  // 休眠的时间是num毫秒
-  // std::cout << "接收到来自" << message.sourcePort << "的消息" << std::endl;
-  // std::cout << "dura" << message.message << std::endl;
-  // std::this_thread::sleep_for(dura);
+  // 消息处理，每个线程接收到的消息只是一个包，有些发送方的消息不只是只有一个包，所有线程之间要协作组合包
+  // 1、先判断这个包是不是不需要和其他包组合
+  if (message.packageSize == message.message.size()) {
+    std::cout << "不需要组合，消息 = " << message.message << std::endl;
+  } else {
+    // 2、需要组合，再次判断是不是本次消息的最后一个包，如果是那么就要把所有包拿出来组合消息，然后打印到终端，
+    // 如果不是最后一个包，那么就需要把包插入到合适的位置
+    auto it = MessageInfo.find(fd);
+    int len = 0;
+    for (auto p : it->second) {
+      len += p[1].size();
+    }
+    if (len == message.packageSize) {
+      // 表明是最后一个包
+      // 组装包消息
+      std::string pkgStrs = "";
+      for (auto pkg : it->second) {
+        pkgStrs += pkg[1];
+      }
+      // 组装完成，打印消息
+      std::cout << "组合之后，消息 = " << pkgStrs << std::endl;
+      // 删除MessageInfo中的包消息
+      it->second.clear();
+    } else {
+      // 表明不是最后一个包，需要把包插入到合适的位置
+      std::vector<std::string> v;
+      v.push_back(std::to_string(message.packageNum));
+      v.push_back(message.message);
+      if (it->second.size() == 0) {
+        // 直接插入
+        it->second.push_back(v);
+      } else {
+        int f = 0;
+        for (auto pkg = it->second.begin(); pkg != it->second.end(); ++pkg) {
+          if (message.packageNum < std::stoi((*pkg)[0])) {
+            f = 1;
+            it->second.insert(pkg, v);
+          }
+        }
+        if (f == 0) {
+          // 直接在末尾插入
+          it->second.push_back(v);
+        }
+      }
+    }
+  }
   {
     std::unique_lock<std::mutex> lock(mutex_task);
     auto it = fd_tasks.find(fd);
@@ -656,7 +718,11 @@ void Server::recvTask(char *strs, my_int fd) {
       it->second["isclose"] = 0;
     }
   }
-  if (closeFlag) close(fd);
+  if (closeFlag) {  // 删除MessageInfo中的消息
+    auto it = MessageInfo.find(fd);
+    MessageInfo.erase(it);
+    close(fd);
+  }
   // }
 }
 
@@ -721,6 +787,9 @@ void Server::recvMessage() {
         event.data.fd = newsd;
         event.events = EPOLLIN;
         epoll_ctl(epollfd, EPOLL_CTL_ADD, newsd, &event);
+        // 构建包消息
+        std::vector<std::vector<std::string>> v;
+        MessageInfo.insert({newsd, v});
         // }
       } else {
         // 表明是已经建立的连接要通信，而不是客户端请求连接
@@ -730,21 +799,21 @@ void Server::recvMessage() {
         // 持续读取数据，知道读取BUfSIZE大小的数据
         while (true) {
           n = read(fd, buf + len, BUFSIZE - len);
-          if (n < 0){
-            if (errno == EWOULDBLOCK){
+          if (n < 0) {
+            if (errno == EWOULDBLOCK) {
               // 表明没有数据可读取，非阻塞IO立即返回
               continue;
             }
             perror("持续读取错误");
             break;
-          }else if (n == 0){
+          } else if (n == 0) {
             perror("持续读取到结尾");
             break;
           }
           len += n;
         }
         std::string closestr(buf);
-        if (closestr == "close"){
+        if (closestr == "close") {
           // 服务器关闭自己
           close(fd);
           close(epollfd);
@@ -756,7 +825,7 @@ void Server::recvMessage() {
           // 表明客户端请求关闭
           auto it = fd_tasks.find(fd);
           if (it == fd_tasks.end()) {
-            std::cout << "出现异常情况yyy" << std::endl;
+            std::cout << "出现异常情况" << std::endl;
           }
           {
             std::unique_lock<std::mutex> lock(mutex_task);
@@ -781,6 +850,9 @@ void Server::recvMessage() {
                     NULL);  // 把要监听的客户端套接字描述符从epoll实例中剔除
               }
               close(fd);
+              // 删除MessageInfo中的消息
+              auto it = MessageInfo.find(fd);
+              MessageInfo.erase(it);
             }
           }
           puts("中继器请求关闭");
@@ -904,14 +976,14 @@ void searchClient() {
     // 去除换行符
     buf[strcspn(buf, "\n")] = '\0';
     std::string strs(buf);
-    if (strs == "search"){
+    if (strs == "search") {
       write(socket_d, buf, sizeof(buf));
       int res = -1;
       res = read(socket_d, buf, BUFSIZE);
       analysis(buf, res);
-    } else if(strs == "close"){
+    } else if (strs == "close") {
       break;
-    } else{
+    } else {
       std::cout << "输入有误" << std::endl;
     }
   }
@@ -942,7 +1014,7 @@ void killThread() {
   close(socket_d);
 }
 
-void Server::killSelf(){
+void Server::killSelf() {
   struct sockaddr_in raddr;
   raddr.sin_family = AF_INET;
   inet_pton(AF_INET, ip.c_str(), &raddr.sin_addr.s_addr);
@@ -962,7 +1034,7 @@ void Server::killSelf(){
   // 休眠毫秒级别
   // std::this_thread::sleep_for(std::chrono::milliseconds(50));
   char buf[BUFSIZE] = {'\0'};
-  const char* str = "close\0";
+  const char *str = "close\0";
   strcpy(buf, str);
   write(socket_d, buf, BUFSIZE);
   close(socket_d);
