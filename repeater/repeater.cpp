@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "threadPool.h"
+ThreadPool* RelayThreadPool;
 
 /**
   std::string sourceIp;  // 发送消息方的ip
@@ -64,11 +65,15 @@ void serializeStruct(const Message &message, char *buffer) {
 }
 
 // 反序列化字节流为结构体
-void deserializeStruct(const char *buffer, Message &message) {
+const char* deserializeStruct(const char *buffer, Message &message) {
+
+  // 暂存buffer的指针
+  const char *tmp = buffer;
   // 反序列化发送方字符串成员的长度和字符数据
   int messageLength;
   memcpy(&messageLength, buffer, sizeof(int));
   buffer += sizeof(int);
+  // std::cout << "ggg = " << messageLength << std::endl;
   message.sourceIp.assign(buffer, messageLength);
   buffer += messageLength;
 
@@ -90,6 +95,8 @@ void deserializeStruct(const char *buffer, Message &message) {
   memcpy(&messageLength, buffer, sizeof(int));
   buffer += sizeof(int);
   message.message.assign(buffer, messageLength);
+
+  return tmp;
 }
 
 void Client::createSocket() {
@@ -106,6 +113,7 @@ void Client::createSocket() {
 
   if (connect(socket_d, (const struct sockaddr *)&raddr, sizeof(raddr)) < 0) {
     perror("connect()");
+    close(socket_d);
     exit(-1);
   }
 }
@@ -115,6 +123,7 @@ void Client::setIpAndPort() {
   socklen_t len = sizeof(laddr);
   if (getsockname(socket_d, (struct sockaddr *)&laddr, &len) < 0) {
     perror("getsockname()");
+    close(socket_d);
     exit(-1);
   }
   char ipt[16];
@@ -140,7 +149,7 @@ void Client::sendMessage(std::string desIp, my_int desPort, std::string msg) {
       message.message = msg.substr(0, len);
       msg = msg.substr(len);
       // 将结构体序列化
-      char buf[BUFSIZE];
+      char buf[BUFSIZE] = {'\0'};
       // memcpy(buf, &message, sizeof(message));
       serializeStruct(message, buf);
       buf[BUFSIZE - 1] = '\0';
@@ -149,7 +158,7 @@ void Client::sendMessage(std::string desIp, my_int desPort, std::string msg) {
     } else {
       message.message = msg;
       // 将结构体序列化
-      char buf[BUFSIZE];
+      char buf[BUFSIZE] = {'\0'};
       // memcpy(buf, &message, sizeof(message));
       serializeStruct(message, buf);
       buf[BUFSIZE - 1] = '\0';
@@ -174,44 +183,72 @@ void RelayServer::searchThread() {
 
   if (bind(socket_d, (const struct sockaddr *)&laddr, sizeof(laddr)) < 0) {
     perror("bind");
-    exit(-1);
+    int state = -1;
+    pthread_exit(&state);
   }
   if (listen(socket_d, 50) < 0) {
     perror("listen()");
-    exit(-1);
+    int state = -1;
+    pthread_exit(&state);
   }
-  socklen_t len;
-  my_int newsd = accept(socket_d, (struct sockaddr *__restrict)&raddr, &len);
-  char ip[16];
-  inet_ntop(AF_INET, &raddr.sin_addr.s_addr, ip, sizeof(ip));
-  printf("client : %s, port = %d\n", ip, ntohs(raddr.sin_port));
-  char buf[BUFSIZE];
-  while (true) {
-    read(newsd, buf, BUFSIZE);
-    // 返回信息
-    // 将 map 序列化为字节流
-    std::string serializedMap;
-    for (const auto &pair : servers) {
-      // 序列化键
-      serializedMap += pair.first + ":";
-
-      // 序列化向量长度
-      int vectorSize = pair.second.size();
-      serializedMap += std::to_string(vectorSize) + ",";
-
-      // 序列化向量元素
-      for (const auto &element : pair.second) {
-        serializedMap += element + ",";
+  socklen_t len = sizeof(raddr);
+  std::cout << "查询线程启动" << std::endl;
+  while (true){
+    my_int newsd = accept(socket_d, (struct sockaddr *)&raddr, &len);
+    if (newsd < 0){
+      close(socket_d);
+      int state = -1;
+      std::cout << "查询线程关闭" << std::endl;
+      pthread_exit(&state);
+    }
+    char ip[16];
+    inet_ntop(AF_INET, &raddr.sin_addr, ip, sizeof(ip));
+    printf("client : %s, port = %d\n", ip, ntohs(raddr.sin_port));
+    char buf[BUFSIZE];
+    while (true) {
+      int len = read(newsd, buf, BUFSIZE);
+      if (len == 0){
+        // 表明对方请求关闭
+        std::cout << "查询客户端请求关闭" << std::endl;
+        close(newsd);
+        break;
       }
+      // 返回信息
+      // 将 map 序列化为字节流
+      std::string str(buf);
+      if (str == "close"){
+        // 表明对方请求关闭线程
+        close(socket_d);
+        std::cout << "查询线程关闭" << std::endl;
+        int state = 0;
+        pthread_exit(&state);
+      }
+      std::string serializedMap;
+      for (const auto &pair : servers) {
+        // 序列化键
+        serializedMap += pair.first + ":";
 
-      serializedMap += ";";
-    }
-    // 返回数据给请求方
-    if (send(newsd, serializedMap.c_str(), serializedMap.size(), 0) == -1) {
-      perror("send()");
-      exit(-1);
+        // 序列化向量长度
+        int vectorSize = pair.second.size();
+        serializedMap += std::to_string(vectorSize) + ",";
+
+        // 序列化向量元素
+        for (const auto &element : pair.second) {
+          serializedMap += element + ",";
+        }
+
+        serializedMap += ";";
+      }
+      // 返回数据给请求方
+      if (send(newsd, serializedMap.c_str(), serializedMap.size(), 0) == -1) {
+        perror("send()");
+        int state = -1;
+        pthread_exit(&state);
+      }
     }
   }
+  close(socket_d);
+  pthread_exit(0);
 }
 
 RelayServer::RelayServer() {
@@ -241,6 +278,10 @@ my_int RelayServer::createSocket(std::string ip, my_int port, my_int flag) {
     socket_d = fd;
     if (bind(fd, (const struct sockaddr *)&laddr, sizeof(laddr)) < 0) {
       perror("bind()");
+      close(fd);
+      delete RelayThreadPool;
+      servers.clear();
+      killThread();
       exit(-1);
     }
   }
@@ -249,6 +290,7 @@ my_int RelayServer::createSocket(std::string ip, my_int port, my_int flag) {
 
 void RelayServer::createPool(my_int threadNum) {
   threadPool = new ThreadPool(threadNum);
+  RelayThreadPool = threadPool;
 }
 
 void RelayServer::myConnect(my_int fd, std::string desIp, my_int desPort) {
@@ -257,6 +299,7 @@ void RelayServer::myConnect(my_int fd, std::string desIp, my_int desPort) {
   inet_pton(AF_INET, desIp.c_str(), &raddr.sin_addr.s_addr);
   raddr.sin_port = htons(desPort);
   // setsockopt(socket_d, SOL_SOCKET, SO_SNDBUF, &val, sizeof(val));
+  std::cout << "port = " << desPort << " " << desIp << std::endl;
 
   if (connect(fd, (const struct sockaddr *)&raddr, sizeof(raddr)) < 0) {
     perror("connect()");
@@ -286,7 +329,7 @@ void RelayServer::coroutineFunction(char *strs, my_int fd) {
   // 真正在传输数据
   Message message;
   // memcpy(&message, buf, sizeof(Message));
-  deserializeStruct(strs, message);
+  auto deletePointer = deserializeStruct(strs, message);
   // 在红黑树中查找信息，如果不存在就需要构建信息，并放入到红黑树中
   auto it = infos.find(std::to_string(fd));
   my_int sendfd;
@@ -314,6 +357,10 @@ void RelayServer::coroutineFunction(char *strs, my_int fd) {
   }
   // 查询servers的信息
   auto s = servers.find(std::to_string(message.desPort));
+  if (s == servers.end()) {
+    // 表明没有找到这个服务器
+    std::cout << "没有找到这个服务器 = " << message.desPort << std::endl;
+  }
 #if FLAG
   auto ele = std::find(s->second.begin(), s->second.end(), std::to_string(fd));
   if (ele == s->second.end()) {
@@ -321,9 +368,9 @@ void RelayServer::coroutineFunction(char *strs, my_int fd) {
     s->second.push_back(std::to_string(fd));
   }
   // 转发消息
-  std::cout << "转发数据到" << sendfd << std::endl;
+  // std::cout << "转发数据到" << sendfd << std::endl;
   write(sendfd, strs, BUFSIZE);
-  delete strs;
+  delete[] deletePointer;
   // send(sendfd, strs, BUFSIZE, 0);
   // 任务处理完成减少fd相关的任务数量记录
   {
@@ -379,6 +426,10 @@ void RelayServer::coroutineFunction(char *strs, my_int fd) {
 void RelayServer::recvMsg() {
   if (listen(socket_d, 50) < 0) {
     perror("listen()");
+    close(socket_d);
+    servers.clear();
+    delete RelayThreadPool;
+    killThread();
     exit(-1);
   }
 
@@ -387,9 +438,13 @@ void RelayServer::recvMsg() {
   // fcntl(socket_d, F_SETFL, flags | O_NONBLOCK);
   // 使用epoll
   struct sockaddr_in raddr;
-  epollfd = epoll_create(2);
+  epollfd = epoll_create(4);
   if (epollfd < 0) {
     perror("epoll()");
+    close(socket_d);
+    servers.clear();
+    delete RelayThreadPool;
+    killThread();
     exit(-1);
   }
   struct epoll_event event;
@@ -404,7 +459,10 @@ void RelayServer::recvMsg() {
     my_int num = epoll_wait(epollfd, revents, REVENTSSIZE, -1);
     if (num < 0) {
       perror("epoll_wait()");
-      exit(-1);
+      servers.clear();
+      close(socket_d);
+      close(epollfd);
+      exit(0);
     }
     for (my_int i = 0; i < num; i++) {
       my_int fd = revents[i].data.fd;
@@ -420,6 +478,9 @@ void RelayServer::recvMsg() {
             break;
           }
           perror("accept()");
+          servers.clear();
+          close(socket_d);
+          close(epollfd);
           exit(-1);
         }
         char ip[16];
@@ -438,14 +499,22 @@ void RelayServer::recvMsg() {
         // 把数据读出来
         char buf[BUFSIZE];
         // int len = read(fd, buf, BUFSIZE);
-        int len = 0;
+        int len = 0, n = 0;
         // 持续读取数据，知道读取BUfSIZE大小的数据
-        while (true) {
-          if (len == BUFSIZE) {
-            // 表明数据读取完毕
+        while (len < BUFSIZE) {
+          n = read(fd, buf + len, BUFSIZE - len);
+          if (n < 0){
+            if (errno == EWOULDBLOCK){
+              // 表明没有数据可读取，非阻塞IO立即返回
+              continue;
+            }
+            perror("持续读取错误");
+            break;
+          }else if (n == 0){
+            perror("持续读取到结尾");
             break;
           }
-          len += read(fd, buf + len, BUFSIZE - len);
+          len += n;
         }
         if (len == 0) {
           // 表明客户端请求关闭
@@ -553,10 +622,12 @@ void Server::createSocket() {
 
   if (bind(socket_d, (const struct sockaddr *)&laddr, sizeof(laddr)) < 0) {
     perror("bind");
+    close(socket_d);
     exit(-1);
   }
   if (listen(socket_d, 50) < 0) {
     perror("listen()");
+    close(socket_d);
     exit(-1);
   }
 }
@@ -567,13 +638,13 @@ void Server::recvTask(char *strs, my_int fd) {
   // 真正在传输数据
   // std::cout << "数据" << std::endl;
   Message message;
-  deserializeStruct(strs, message);
+  auto deletePointer = deserializeStruct(strs, message);
   // 消息解析完成
-  delete strs;
+  delete[] deletePointer;
   // 输出消息
   // std::chrono::milliseconds dura(
   //     std::stoi(message.message));  // 休眠的时间是num毫秒
-  std::cout << "接收到来自" << message.sourcePort << "的消息" << std::endl;
+  // std::cout << "接收到来自" << message.sourcePort << "的消息" << std::endl;
   // std::cout << "dura" << message.message << std::endl;
   // std::this_thread::sleep_for(dura);
   {
@@ -598,7 +669,9 @@ void Server::recvMessage() {
   epollfd = epoll_create(2);
   if (epollfd < 0) {
     perror("epoll()");
-    exit(-1);
+    close(socket_d);
+    int state = -1;
+    pthread_exit(&state);
   }
   struct epoll_event event;
   event.data.fd = socket_d;
@@ -606,13 +679,18 @@ void Server::recvMessage() {
   epoll_ctl(epollfd, EPOLL_CTL_ADD, socket_d, &event);
 
   struct epoll_event revents[REVENTSSIZE];
+  std::cout << "服务器启动" << std::endl;
 
   while (true) {
     //
     my_int num = epoll_wait(epollfd, revents, REVENTSSIZE, -1);
     if (num < 0) {
       perror("epoll_wait()");
-      exit(-1);
+      close(socket_d);
+      close(epollfd);
+      std::cout << "epoll_wait被中断的服务器关闭" << std::endl;
+      int state = -1;
+      pthread_exit(&state);
     }
     for (my_int i = 0; i < num; i++) {
       my_int fd = revents[i].data.fd;
@@ -627,17 +705,16 @@ void Server::recvMessage() {
             // 表明本次通知的待处理事件全部处理完成
             break;
           }
+          close(socket_d);
+          close(epollfd);
+          std::cout << "accept被中断的服务器关闭" << std::endl;
           perror("accept()");
-          exit(-1);
+          int state = -1;
+          pthread_exit(&state);
         }
         char ip[16];
         inet_ntop(AF_INET, &raddr.sin_addr.s_addr, ip, sizeof(ip));
         printf("client : %s, port : %d\n", ip, ntohs(raddr.sin_port));
-        if (newsd < 0) {
-          perror("accept()");
-          close(socket_d);
-          exit(-1);
-        }
         // 把socket_d套接口设置成非阻塞模式
         my_int flags = fcntl(newsd, F_GETFL, 0);
         fcntl(newsd, F_SETFL, flags | O_NONBLOCK);
@@ -649,14 +726,31 @@ void Server::recvMessage() {
         // 表明是已经建立的连接要通信，而不是客户端请求连接
 
         char buf[BUFSIZE];
-        int len = 0;
+        int len = 0, n = 0;
         // 持续读取数据，知道读取BUfSIZE大小的数据
         while (true) {
-          if (len == BUFSIZE) {
-            // 表明数据读取完毕
+          n = read(fd, buf + len, BUFSIZE - len);
+          if (n < 0){
+            if (errno == EWOULDBLOCK){
+              // 表明没有数据可读取，非阻塞IO立即返回
+              continue;
+            }
+            perror("持续读取错误");
+            break;
+          }else if (n == 0){
+            perror("持续读取到结尾");
             break;
           }
-          len += read(fd, buf + len, BUFSIZE - len);
+          len += n;
+        }
+        std::string closestr(buf);
+        if (closestr == "close"){
+          // 服务器关闭自己
+          close(fd);
+          close(epollfd);
+          std::cout << "正常的服务器关闭" << std::endl;
+          int state = 0;
+          pthread_exit(&state);
         }
         if (len == 0) {
           // 表明客户端请求关闭
@@ -729,6 +823,8 @@ void Server::recvMessage() {
   }
   close(socket_d);
   close(epollfd);
+  int state = 0;
+  pthread_exit(&state);
 }
 
 /**
@@ -787,7 +883,7 @@ void analysis(char *buffer, my_int bytesRead) {
 void searchClient() {
   struct sockaddr_in raddr;
   raddr.sin_family = AF_INET;
-  inet_pton(AF_INET, serverIp, &raddr.sin_addr.s_addr);
+  inet_pton(AF_INET, SERVERIP, &raddr.sin_addr.s_addr);
   raddr.sin_port = htons(searchPort);
 
   int socket_d = socket(AF_INET, SOCK_STREAM, 0);
@@ -802,13 +898,72 @@ void searchClient() {
   }
 
   char *resN = NULL;
-  char buf[BUFSIZE];
+  char buf[BUFSIZE] = {'\0'};
   // shutdown(socket_d, SHUT_RD);
   while ((resN = (fgets(buf, BUFSIZE, stdin))) != NULL) {
-    write(socket_d, buf, sizeof(buf));
-    int res = -1;
-    res = read(socket_d, buf, BUFSIZE);
-    analysis(buf, res);
+    // 去除换行符
+    buf[strcspn(buf, "\n")] = '\0';
+    std::string strs(buf);
+    if (strs == "search"){
+      write(socket_d, buf, sizeof(buf));
+      int res = -1;
+      res = read(socket_d, buf, BUFSIZE);
+      analysis(buf, res);
+    } else if(strs == "close"){
+      break;
+    } else{
+      std::cout << "输入有误" << std::endl;
+    }
   }
+  close(socket_d);
+}
+
+// 中继器自己杀死这个分离的线程
+void killThread() {
+  struct sockaddr_in raddr;
+  raddr.sin_family = AF_INET;
+  inet_pton(AF_INET, SERVERIP, &raddr.sin_addr.s_addr);
+  raddr.sin_port = htons(searchPort);
+
+  int socket_d = socket(AF_INET, SOCK_STREAM, 0);
+
+  int val = 1;
+  setsockopt(socket_d, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val));
+  // setsockopt(socket_d, SOL_SOCKET, SO_SNDBUF, &val, sizeof(val));
+
+  if (connect(socket_d, (const struct sockaddr *)&raddr, sizeof(raddr)) < 0) {
+    perror("connect()");
+    exit(-1);
+  }
+  // 休眠毫秒级别
+  // std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  char buf[6] = {'c', 'l', 'o', 's', 'e', '\0'};
+  write(socket_d, buf, 6);
+  close(socket_d);
+}
+
+void Server::killSelf(){
+  struct sockaddr_in raddr;
+  raddr.sin_family = AF_INET;
+  inet_pton(AF_INET, ip.c_str(), &raddr.sin_addr.s_addr);
+  raddr.sin_port = htons(port);
+
+  int socket_d = socket(AF_INET, SOCK_STREAM, 0);
+
+  int val = 1;
+  setsockopt(socket_d, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val));
+  // setsockopt(socket_d, SOL_SOCKET, SO_SNDBUF, &val, sizeof(val));
+
+  if (connect(socket_d, (const struct sockaddr *)&raddr, sizeof(raddr)) < 0) {
+    perror("connect()");
+    close(socket_d);
+    exit(-1);
+  }
+  // 休眠毫秒级别
+  // std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  char buf[BUFSIZE] = {'\0'};
+  const char* str = "close\0";
+  strcpy(buf, str);
+  write(socket_d, buf, BUFSIZE);
   close(socket_d);
 }

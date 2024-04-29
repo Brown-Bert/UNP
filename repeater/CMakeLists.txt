@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.0.0)
 
 set(CMAKE_CXX_COMPILER "/usr/bin/g++" )
 
-# add_compile_options(-std=c++20 -fcoroutines)
+add_compile_options(-O0)
 
 add_library(library repeater.cpp)
 

@@ -113,6 +113,7 @@ class ThreadPool {
   }
 
   ~ThreadPool() {
+    std::cout << "线程池析构" << std::endl;
     {
       std::unique_lock<std::mutex> lock(mutex);
       stop = true;

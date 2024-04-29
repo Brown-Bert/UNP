@@ -6,8 +6,16 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <csignal>
 
 #include "repeater.h"
+
+bool CLIENTSTOP = false;
+
+void signalHandler(int signal) {
+    // 释放中继服务器的线程池
+    CLIENTSTOP = true;
+}
 
 std::string ConstructStringWithByteSize(std::size_t size) {
   std::vector<char> charVector(size, 'a');
@@ -15,6 +23,19 @@ std::string ConstructStringWithByteSize(std::size_t size) {
 }
 
 int main(int argc, char* argv[]) {
+  // 注册信号
+  struct sigaction sa;
+  sa.sa_handler = signalHandler; // 设置信号处理函数
+  sigemptyset(&sa.sa_mask);      // 清空信号屏蔽字
+  sa.sa_flags = 0;               // 设置默认标志
+
+  // 注册信号处理程序
+  if (sigaction(SIGINT, &sa, NULL) == -1) {
+      std::cerr << "Failed to register signal handler" << std::endl;
+      exit(-1);
+  }else {
+    std::cout << "信号注册成功" << std::endl;
+  }
   // 构造1000个客户端给100个服务器发送消息
   if (argc < 3) {
     std::cerr << "参数有问题" << std::endl;
@@ -28,6 +49,9 @@ int main(int argc, char* argv[]) {
   std::cout << "byteSize: " << byteSize << std::endl;
   std::vector<std::thread> handlers;
   for (int i = 0; i < clientNum; i++) {
+    if (startPort > (serverPortStart + serverNum - 1)) {
+      startPort = serverPortStart;
+    }
     handlers.push_back(std::thread([=]() {
       Client client(i);
       client.createSocket();
@@ -35,6 +59,7 @@ int main(int argc, char* argv[]) {
       client.setIpAndPort();
       std::string str = ConstructStringWithByteSize(byteSize);
       while (true) {
+        if (CLIENTSTOP) break;
         client.sendMessage(serverIp, startPort, str);
         // sleep(1);
       }
@@ -44,9 +69,6 @@ int main(int argc, char* argv[]) {
       client.closefd();  // 关闭套接字描述符
     }));
     std::cout << "几遍 = " << handlers.size() << std::endl;
-    if (startPort > (serverPortStart + serverNum - 1)) {
-      startPort = serverPortStart;
-    }
     startPort++;
   }
   for (auto& t : handlers) {

@@ -34,6 +34,9 @@ typedef struct {
   std::string desIp;     // 接收消息方的ip
   my_int desPort;        // 接收消息方的端口
   std::string message;   // 具体的消息
+  my_int packageSize;    // 包的大小
+  my_int packageNum;     // 包的编号，虽然tcp是先建立通道，再发送消息，底层的包是保证顺序到达，即使因为网络的原因导致包的丢失，tcp会重新发送
+                         // 将分隔好的包重组再上交给上一层，但是自定义包这些是保证不了的，而且在服务器是多线程接收，更加保证不了包的顺序
 } Message;
 
 /**
@@ -68,6 +71,7 @@ typedef struct {
 /**
   中继服务器
 */
+extern ThreadPool* RelayThreadPool;
 class RelayServer {
  public:
   my_int socket_d;                    // 中继服务器的套接字描述符
@@ -82,7 +86,7 @@ class RelayServer {
 
  public:
   RelayServer();  // 初始化中继服务器的同时初始化servers变量，并且单独开出一个线程用于输出信息
-  ~RelayServer() { free(threadPool); }  // 释放指向线程池的指针
+  ~RelayServer() { servers.clear();delete threadPool; }  // 释放指向线程池的指针
   my_int createSocket(
       std::string ip, my_int port,
       my_int flag);  // 中继服务器创建套接字描述符, flag = 0;
@@ -109,7 +113,7 @@ class Server {
   my_int epollfd;          // 记录epoll实例
   ThreadPool* threadPool;  // 线程池
  public:
-  ~Server() { free(threadPool); }
+  ~Server() { delete threadPool; }
   Server(my_int port, std::string ip) : ip(ip), port(port){};
   void createSocket();  // 创建客户端网络套接字描述符
   void recvTask(char* strs, my_int fd);
@@ -117,7 +121,9 @@ class Server {
   std::map<my_int, std::map<std::string, my_int>>
       fd_tasks;  // 因为多线程操作同一个描述符，会造成其他线程在处理任务的时候，有一个线程已经接收到了关闭套接字描述符的任务
   // 为了确保关闭套接字之前，关于套接字的任务全部执行完毕，需要记录套接字相关的任务数量
+  void killSelf(); // 服务器自己杀死这个分离的线程
 };
 
 void searchClient();
+void killThread();// 中继器自己杀死这个分离的线程
 #endif
