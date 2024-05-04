@@ -59,14 +59,16 @@ int main(int argc, char* argv[]) {
       client.setIpAndPort();
       std::string str = ConstructStringWithByteSize(byteSize);
       while (true) {
-        if (CLIENTSTOP) break;
+        if (CLIENTSTOP) {
+          client.closefd();  // 关闭套接字描述符
+          break;
+        }
         client.sendMessage(serverIp, startPort, str);
         // sleep(1);
       }
       // std::cout << i << std::endl;
       // std::this_thread::sleep_for(std::chrono::milliseconds(100));
       // sleep(2);
-      client.closefd();  // 关闭套接字描述符
     }));
     std::cout << "几遍 = " << handlers.size() << std::endl;
     startPort++;

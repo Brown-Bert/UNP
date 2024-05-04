@@ -3,13 +3,13 @@
 
 #include "repeater.h"
 extern ThreadPool* RelayThreadPool;
-
+extern int SIGANLSTOP;
 // 中继服务器注册信号行为函数
 void signalHandler(int signal) {
     // 释放中继服务器的线程池
-    delete RelayThreadPool;
     killThread();
-    exit(0);
+    SIGANLSTOP = true;
+    // exit(0);
 }
 
 int main(int argc, char* argv[]) {

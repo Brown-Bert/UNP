@@ -24,6 +24,7 @@
 
 #include "threadPool.h"
 ThreadPool *RelayThreadPool;
+int SIGANLSTOP = false;
 
 /**
   std::string sourceIp;  // 发送消息方的ip
@@ -321,7 +322,6 @@ void RelayServer::myConnect(my_int fd, std::string desIp, my_int desPort) {
   inet_pton(AF_INET, desIp.c_str(), &raddr.sin_addr.s_addr);
   raddr.sin_port = htons(desPort);
   // setsockopt(socket_d, SOL_SOCKET, SO_SNDBUF, &val, sizeof(val));
-  std::cout << "port = " << desPort << " " << desIp << std::endl;
 
   if (connect(fd, (const struct sockaddr *)&raddr, sizeof(raddr)) < 0) {
     perror("connect()");
@@ -353,29 +353,29 @@ void RelayServer::coroutineFunction(char *strs, my_int fd) {
   // memcpy(&message, buf, sizeof(Message));
   auto deletePointer = deserializeStruct(strs, message);
   // 在红黑树中查找信息，如果不存在就需要构建信息，并放入到红黑树中
-  auto it = infos.find(std::to_string(fd));
   my_int sendfd;
-  if (it == infos.end()) {
-    // 表明在红黑树中没有查到，就需要构造一个消息节点
-    Info info;
-    info.desIp = message.desIp;
-    info.desPort = message.desPort;
-    info.socket_d =
-        createSocket(info.desIp, info.desPort, 0);  // 创建之后发出连接请求
-    sendfd = info.socket_d;
-    myConnect(sendfd, info.desIp, info.desPort);
+  {
+    std::unique_lock<std::mutex> lock(mutex_infos);
+    auto it = infos.find(std::to_string(fd));
+    if (it == infos.end()) {
+      // 表明在红黑树中没有查到，就需要构造一个消息节点
+      Info info;
+      info.desIp = message.desIp;
+      info.desPort = message.desPort;
+      info.socket_d =
+          createSocket(info.desIp, info.desPort, 0);  // 创建之后发出连接请求
+      sendfd = info.socket_d;
+      myConnect(sendfd, info.desIp, info.desPort);
     // 构造套接字
-    {
-      std::unique_lock<std::mutex> lock(mutex_infos);
-      infos[std::to_string(fd)] = info;  // 把节点信息加入到红黑树中
+      infos.insert(std::make_pair(std::to_string(fd), info));  // 把节点信息加入到红黑树中
       // Info *info1 = new Info;
       // infos["1"] = *info1;
       // infos.insert(std::make_pair(std::to_string(fd), info));
-    }
     // std::cout << getpid() << std::endl;
-  } else {
-    // 表明在红黑树中已经存在节点了
-    sendfd = it->second.socket_d;
+    } else {
+      // 表明在红黑树中已经存在节点了
+      sendfd = it->second.socket_d;
+    }
   }
   // 查询servers的信息
   auto s = servers.find(std::to_string(message.desPort));
@@ -427,20 +427,20 @@ void RelayServer::coroutineFunction(char *strs, my_int fd) {
 #endif
   // 判断是不是要执行关闭
   if (closeFlag) {
-    auto its = infos.find(std::to_string(fd));
-    // 向真正的服务器请求关闭
     std::cout << "线程中真正关闭" << std::endl;
-    close(its->second.socket_d);
     {
+      auto its = infos.find(std::to_string(fd));
+      // 向真正的服务器请求关闭
+      close(its->second.socket_d);
       std::unique_lock<std::mutex> lock(mutex_infos);
       infos.erase(its);
+      close(fd);
+      // 删除servers中客户端
+      auto s = servers.find(std::to_string(its->second.desPort));
+      auto ele =
+          std::find(s->second.begin(), s->second.end(), std::to_string(fd));
+      s->second.erase(ele);
     }
-    close(fd);
-    // 删除servers中客户端
-    auto s = servers.find(std::to_string(its->second.desPort));
-    auto ele =
-        std::find(s->second.begin(), s->second.end(), std::to_string(fd));
-    s->second.erase(ele);
   }
   // }
 }
@@ -476,11 +476,20 @@ void RelayServer::recvMsg() {
 
   struct epoll_event revents[REVENTSSIZE];
 
+  std::cout << "中继服务器启动" << std::endl;
   while (true) {
-    //
     my_int num = epoll_wait(epollfd, revents, REVENTSSIZE, -1);
+    if (SIGANLSTOP){
+      // 信号中断
+      std::cout << "进入" << std::endl;
+      delete RelayThreadPool;
+      servers.clear();
+      sleep(2);
+      exit(0);
+    }
     if (num < 0) {
       perror("epoll_wait()");
+      delete RelayThreadPool;
       servers.clear();
       close(socket_d);
       close(epollfd);
@@ -500,6 +509,7 @@ void RelayServer::recvMsg() {
             break;
           }
           perror("accept()");
+          delete RelayThreadPool;
           servers.clear();
           close(socket_d);
           close(epollfd);
@@ -663,55 +673,57 @@ void Server::recvTask(char *strs, my_int fd) {
   auto deletePointer = deserializeStruct(strs, message);
   // 消息解析完成
   delete[] deletePointer;
+  // std::cout << "解析完成" << std::endl;
   // 消息处理，每个线程接收到的消息只是一个包，有些发送方的消息不只是只有一个包，所有线程之间要协作组合包
   // 1、先判断这个包是不是不需要和其他包组合
-  if (message.packageSize == message.message.size()) {
-    std::cout << "不需要组合，消息 = " << message.message << std::endl;
-  } else {
-    // 2、需要组合，再次判断是不是本次消息的最后一个包，如果是那么就要把所有包拿出来组合消息，然后打印到终端，
-    // 如果不是最后一个包，那么就需要把包插入到合适的位置
-    auto it = MessageInfo.find(fd);
-    int len = 0;
-    for (auto p : it->second) {
-      len += p[1].size();
-    }
-    if (len == message.packageSize) {
-      // 表明是最后一个包
-      // 组装包消息
-      std::string pkgStrs = "";
-      for (auto pkg : it->second) {
-        pkgStrs += pkg[1];
-      }
-      // 组装完成，打印消息
-      std::cout << "组合之后，消息 = " << pkgStrs << std::endl;
-      // 删除MessageInfo中的包消息
-      it->second.clear();
-    } else {
-      // 表明不是最后一个包，需要把包插入到合适的位置
-      std::vector<std::string> v;
-      v.push_back(std::to_string(message.packageNum));
-      v.push_back(message.message);
-      if (it->second.size() == 0) {
-        // 直接插入
-        it->second.push_back(v);
-      } else {
-        int f = 0;
-        for (auto pkg = it->second.begin(); pkg != it->second.end(); ++pkg) {
-          if (message.packageNum < std::stoi((*pkg)[0])) {
-            f = 1;
-            it->second.insert(pkg, v);
-          }
-        }
-        if (f == 0) {
-          // 直接在末尾插入
-          it->second.push_back(v);
-        }
-      }
-    }
-  }
+  // if (message.packageSize == message.message.size()) {
+  //   std::cout << "不需要组合，消息 = " << message.message << std::endl;
+  // } else {
+  //   // 2、需要组合，再次判断是不是本次消息的最后一个包，如果是那么就要把所有包拿出来组合消息，然后打印到终端，
+  //   // 如果不是最后一个包，那么就需要把包插入到合适的位置
+  //   auto it = MessageInfo.find(fd);
+  //   int len = 0;
+  //   for (auto p : it->second) {
+  //     len += p[1].size();
+  //   }
+  //   if (len == message.packageSize) {
+  //     // 表明是最后一个包
+  //     // 组装包消息
+  //     std::string pkgStrs = "";
+  //     for (auto pkg : it->second) {
+  //       pkgStrs += pkg[1];
+  //     }
+  //     // 组装完成，打印消息
+  //     std::cout << "组合之后，消息 = " << pkgStrs << std::endl;
+  //     // 删除MessageInfo中的包消息
+  //     it->second.clear();
+  //   } else {
+  //     // 表明不是最后一个包，需要把包插入到合适的位置
+  //     std::vector<std::string> v;
+  //     v.push_back(std::to_string(message.packageNum));
+  //     v.push_back(message.message);
+  //     if (it->second.size() == 0) {
+  //       // 直接插入
+  //       it->second.push_back(v);
+  //     } else {
+  //       int f = 0;
+  //       for (auto pkg = it->second.begin(); pkg != it->second.end(); ++pkg) {
+  //         if (message.packageNum < std::stoi((*pkg)[0])) {
+  //           f = 1;
+  //           it->second.insert(pkg, v);
+  //         }
+  //       }
+  //       if (f == 0) {
+  //         // 直接在末尾插入
+  //         it->second.push_back(v);
+  //       }
+  //     }
+  //   }
+  // }
   {
     std::unique_lock<std::mutex> lock(mutex_task);
     auto it = fd_tasks.find(fd);
+    // std::cout << "数量 = " << it->second["number"] << std::endl;
     it->second["number"]--;
     if (it->second["isclose"] == 1) {
       closeFlag = 1;
@@ -719,6 +731,7 @@ void Server::recvTask(char *strs, my_int fd) {
     }
   }
   if (closeFlag) {  // 删除MessageInfo中的消息
+    std::cout << "线程中真正关闭" << std::endl;
     auto it = MessageInfo.find(fd);
     MessageInfo.erase(it);
     close(fd);
@@ -797,7 +810,7 @@ void Server::recvMessage() {
         char buf[BUFSIZE];
         int len = 0, n = 0;
         // 持续读取数据，知道读取BUfSIZE大小的数据
-        while (true) {
+        while (len < BUFSIZE) {
           n = read(fd, buf + len, BUFSIZE - len);
           if (n < 0) {
             if (errno == EWOULDBLOCK) {
@@ -807,11 +820,14 @@ void Server::recvMessage() {
             perror("持续读取错误");
             break;
           } else if (n == 0) {
-            perror("持续读取到结尾");
+            // perror("持续读取到结尾");
+            std::cout << "持续读取到结尾 = " << len << std::endl;
             break;
           }
           len += n;
         }
+        if (len != 2048 && len != 0) puts("出现粘包");
+        // buf[BUFSIZE - 1] = '\0';
         std::string closestr(buf);
         if (closestr == "close") {
           // 服务器关闭自己
@@ -842,6 +858,7 @@ void Server::recvMessage() {
               }
             } else {
               // 可以在此线程中执行关闭
+              std::cout << "epoll中真正关闭" << std::endl;
               it->second["state"] = 0;
               {
                 std::unique_lock<std::mutex> lock(mutex_epollfd);
@@ -855,7 +872,8 @@ void Server::recvMessage() {
               MessageInfo.erase(it);
             }
           }
-          puts("中继器请求关闭");
+          // puts("中继器请求关闭");
+          std::cout << std::this_thread::get_id() << "中继器请求关闭 = " << fd << std::endl;
         } else if (len < 0) {
           std::cout << "epoll读取异常" << std::endl;
         } else {
