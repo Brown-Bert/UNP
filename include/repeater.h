@@ -44,24 +44,26 @@ typedef struct {
     客户端
 */
 class Client {
- private:
+ public:
   my_int id;        // 唯一标识一个客户端
   my_int count;     // 用于每个客户端模拟通信的次数
   my_int socket_d;  // 用于中继器网络套接字的描述符
   std::string ip;   // 每个客户端自己ip
   my_int port;      // 每个客户端自己端口
+  std::string server_ip; // 服务器ip
+  my_int server_port; // 服务器端口
+  std::string msg;  // 每个客户端自己的消息
  public:
   Client(my_int id) : id(id){};
   void createSocket();  // 创建客户端网络套接字描述符
   void
   setIpAndPort();  // 调用createSocket之后使用的是系统默认分配端口和本地ip，使用本函数获取ip和端口填入到类中
-  void sendMessage(
-      std::string desIp, my_int desPort,
-      std::string msg);  // 运行客户端并发送消息，msg:具体要发送的消息
   void closefd() {
     close(socket_d);  // 关闭套接字描述符
   }
 };
+
+void sendMessage(my_int socket_d, std::string source_ip, my_int source_port, std::string des_ip, my_int des_port, std::string msg);  // 运行客户端并发送消息，msg:具体要发送的消息
 
 typedef struct {
   std::string desIp;  // 目的地的ip
@@ -88,6 +90,7 @@ class RelayServer {
  public:
   RelayServer();  // 初始化中继服务器的同时初始化servers变量，并且单独开出一个线程用于输出信息
   ~RelayServer() {
+    std::cout << "中继服务器析构" << std::endl;
     servers.clear();
     delete threadPool;
   }  // 释放指向线程池的指针
@@ -100,7 +103,7 @@ class RelayServer {
       my_int threadNum);  // 创建线程池, threadNum 线程池初始化时的线程个数
   void
   searchThread();  // 中继服务器上创建一个线程，用于返回给特定请求中继服务器管理的客户端与服务器的情况以及详细信息
-  void coroutineFunction(char* strs, my_int fd);
+  void coroutineFunction(std::shared_ptr<char> strs, my_int fd);
   void myConnect(my_int fd, std::string desIp,
                  my_int desPort);  // 连接远程服务器
 };
@@ -122,7 +125,7 @@ class Server {
   ~Server() { delete threadPool; }
   Server(my_int port, std::string ip) : ip(ip), port(port){};
   void createSocket();  // 创建客户端网络套接字描述符
-  void recvTask(char* strs, my_int fd);
+  void recvTask(std::shared_ptr<char> strs, my_int fd);
   void recvMessage();  // 运行客户端并发送消息，msg:具体要发送的消息
   std::map<my_int, std::map<std::string, my_int>>
       fd_tasks;  // 因为多线程操作同一个描述符，会造成其他线程在处理任务的时候，有一个线程已经接收到了关闭套接字描述符的任务

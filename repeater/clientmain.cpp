@@ -1,3 +1,4 @@
+#include <fcntl.h>
 #include <unistd.h>
 
 #include <chrono>
@@ -9,6 +10,7 @@
 #include <csignal>
 
 #include "repeater.h"
+#include "threadPool.h"
 
 bool CLIENTSTOP = false;
 
@@ -18,7 +20,7 @@ void signalHandler(int signal) {
 }
 
 std::string ConstructStringWithByteSize(std::size_t size) {
-  std::vector<char> charVector(size, 'a');
+  std::vector<char> charVector(size - 1, 'a');
   return std::string(charVector.begin(), charVector.end()) + '\0';
 }
 
@@ -37,46 +39,66 @@ int main(int argc, char* argv[]) {
     std::cout << "信号注册成功" << std::endl;
   }
   // 构造1000个客户端给100个服务器发送消息
-  if (argc < 3) {
+  if (argc < 4) {
     std::cerr << "参数有问题" << std::endl;
     return 0;
   }
   my_int startPort = serverPortStart;
   int clientNum = std::stoi(argv[1]);
   int byteSize = std::stoi(argv[2]);  // 传输的字节大小，单位值B
+  int threadNum = std::stoi(argv[3]); // 线程池的线程数量
   // 输出
   std::cout << "clientNum: " << clientNum << std::endl;
   std::cout << "byteSize: " << byteSize << std::endl;
-  std::vector<std::thread> handlers;
-  for (int i = 0; i < clientNum; i++) {
-    if (startPort > (serverPortStart + serverNum - 1)) {
-      startPort = serverPortStart;
-    }
-    handlers.push_back(std::thread([=]() {
+  std::vector<Client> clients;
+  { // 放在域中，为了出域的时候调用线程池的析构函数
+    // 创建线程池
+    ThreadPool threadPool(threadNum);
+    std::string str = ConstructStringWithByteSize(byteSize);
+    for (int i = 0; i < clientNum; i++) {
+      if (startPort > (serverPortStart + serverNum - 1)) {
+        startPort = serverPortStart;
+      }
       Client client(i);
       client.createSocket();
       // sleep(2);
+      my_int flags = fcntl(client.socket_d, F_GETFL, 0);
+      fcntl(client.socket_d, F_SETFL, flags | O_NONBLOCK);
       client.setIpAndPort();
-      std::string str = ConstructStringWithByteSize(byteSize);
-      while (true) {
-        if (CLIENTSTOP) {
-          client.closefd();  // 关闭套接字描述符
-          break;
-        }
-        client.sendMessage(serverIp, startPort, str);
-        // sleep(1);
-      }
+      client.server_ip = serverIp;
+      client.server_port = startPort;
+      client.msg = str;
+      clients.push_back(client);
+      // while (!CLIENTSTOP) {
+      //   client.sendMessage(serverIp, startPort, str);
+      //   // std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+      // }
+      
       // std::cout << i << std::endl;
       // std::this_thread::sleep_for(std::chrono::milliseconds(100));
       // sleep(2);
-    }));
-    std::cout << "几遍 = " << handlers.size() << std::endl;
-    startPort++;
+      std::cout << "客户端数量 = " << clients.size() << std::endl;
+      startPort++;
+    }
+    while (!CLIENTSTOP) {
+      // 发送消息
+      for (auto& t : clients) {
+        threadPool.enqueue([
+        fd = t.socket_d, 
+        source_ip = t.ip, 
+        source_port = t.port, 
+        des_ip = t.server_ip, 
+        des_port = t.server_port,
+        message = t.msg](){
+          sendMessage(fd, source_ip, source_port, des_ip, des_port, message);
+        });
+      }
+    }
   }
-  for (auto& t : handlers) {
-    std::cout << "join" << std::endl;
-    t.join();
+  for (auto& t : clients) {
+    t.closefd();
   }
+
   std::cout << "结束" << std::endl;
   return 0;
 }

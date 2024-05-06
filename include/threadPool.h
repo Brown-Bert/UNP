@@ -20,12 +20,13 @@ class ThreadPool {
             std::unique_lock<std::mutex> lock(mutex);
             condition.wait(lock, [this] { return stop || !tasks.empty(); });
             if (stop && tasks.empty()) {
+              std::cout << "线程退出" << std::endl;
               return;
             }
+            std::cout << "线程剩余任务数量 = " << tasks.size() << std::endl;
             task = std::move(tasks.front());
             tasks.pop();
           }
-          // std::cout << "任务数量 = " << tasks.size() << std::endl;
           task();
         }
       });
@@ -64,11 +65,9 @@ class ThreadPool {
               if (stop && tasks.empty()) {
                 return;
               }
-
               task = std::move(tasks.front());
               tasks.pop();
             }
-
             task();
           }
         });
@@ -113,7 +112,7 @@ class ThreadPool {
   }
 
   ~ThreadPool() {
-    std::cout << "线程池析构" << std::endl;
+    std::cout << "线程池析构开始，任务数量 = " << tasks.size() << std::endl;
     {
       std::unique_lock<std::mutex> lock(mutex);
       stop = true;
@@ -122,6 +121,7 @@ class ThreadPool {
     for (std::thread& worker : workers) {
       worker.join();
     }
+    std::cout << "线程池析构完成" << std::endl;
   }
 
  private:
