@@ -39,80 +39,82 @@ int SIGANLSTOP = false;
 // 序列化结构体为字节流
 void serializeStruct(const Message &message, char *buffer) {
   // 序列化发送方ip字符串成员的长度和字符数据
-  int messageLength = message.sourceIp.length();
-  memcpy(buffer, &messageLength, sizeof(int));
-  buffer += sizeof(int);
+  int messageLength = message.sourceIp.size();
+  memcpy(buffer, &messageLength, sizeof(my_int));
+  buffer += sizeof(my_int);
   memcpy(buffer, message.sourceIp.c_str(), messageLength);
   buffer += messageLength;
 
   // 序列化发送方port
-  memcpy(buffer, &message.sourcePort, sizeof(int));
-  buffer += sizeof(int);
+  memcpy(buffer, &message.sourcePort, sizeof(my_int));
+  buffer += sizeof(my_int);
 
   // 序列化接收方ip字符串成员的长度和字符数据
-  messageLength = message.desIp.length();
-  memcpy(buffer, &messageLength, sizeof(int));
-  buffer += sizeof(int);
+  messageLength = message.desIp.size();
+  memcpy(buffer, &messageLength, sizeof(my_int));
+  buffer += sizeof(my_int);
   memcpy(buffer, message.desIp.c_str(), messageLength);
   buffer += messageLength;
 
   // 序列化发送方port
-  memcpy(buffer, &message.desPort, sizeof(int));
+  memcpy(buffer, &message.desPort, sizeof(my_int));
+  buffer += sizeof(my_int);
+
+  // 序列化包的大小
+  memcpy(buffer, &message.packageSize, sizeof(my_int));
+  buffer += sizeof(my_int);
+
+  // 序列化包的编号
+  memcpy(buffer, &message.packageNum, sizeof(my_int));
   buffer += sizeof(int);
 
   // 序列化具体的消息
-  messageLength = message.message.length();
-  memcpy(buffer, &messageLength, sizeof(int));
-  buffer += sizeof(int);
+  messageLength = message.message.size();
+  memcpy(buffer, &messageLength, sizeof(my_int));
+  buffer += sizeof(my_int);
   memcpy(buffer, message.message.c_str(), messageLength);
   buffer += messageLength;
 
-  // 序列化包的大小
-  memcpy(buffer, &message.packageSize, sizeof(int));
-  buffer += sizeof(int);
-
-  // 序列化包的编号
-  memcpy(buffer, &message.packageNum, sizeof(int));
-  buffer += sizeof(int);
 }
 
 // 反序列化字节流为结构体
 void deserializeStruct(const char *tmp, Message &message) {
   // 反序列化发送方字符串成员的长度和字符数据
   int messageLength;
-  memcpy(&messageLength, tmp, sizeof(int));
-  tmp += sizeof(int);
+  memcpy(&messageLength, tmp, sizeof(my_int));
+  tmp += sizeof(my_int);
   // std::cout << "ggg = " << messageLength << std::endl;
   message.sourceIp.assign(tmp, messageLength);
   tmp += messageLength;
 
   // 反序列化发送方的port
-  memcpy(&message.sourcePort, tmp, sizeof(int));
-  tmp += sizeof(int);
+  memcpy(&message.sourcePort, tmp, sizeof(my_int));
+  tmp += sizeof(my_int);
 
   // 反序列化接收方字符串成员的长度和字符数据
-  memcpy(&messageLength, tmp, sizeof(int));
-  tmp += sizeof(int);
+  memcpy(&messageLength, tmp, sizeof(my_int));
+  tmp += sizeof(my_int);
   message.desIp.assign(tmp, messageLength);
   tmp += messageLength;
 
   // 反序列化接收方的port
-  memcpy(&message.desPort, tmp, sizeof(int));
+  memcpy(&message.desPort, tmp, sizeof(my_int));
+  tmp += sizeof(my_int);
+
+  // 反序列化接收方的包大小
+  memcpy(&message.packageSize, tmp, sizeof(my_int));
+  tmp += sizeof(my_int);
+
+  // 反序列化接收方的包编号
+  memcpy(&message.packageNum, tmp, sizeof(my_int));
   tmp += sizeof(int);
 
   // 反序列化具体消息
-  memcpy(&messageLength, tmp, sizeof(int));
-  tmp += sizeof(int);
+  memcpy(&messageLength, tmp, sizeof(my_int));
+  tmp += sizeof(my_int);
   message.message.assign(tmp, messageLength);
   tmp += messageLength;
 
-  // 反序列化接收方的包大小
-  memcpy(&message.packageSize, tmp, sizeof(int));
-  tmp += sizeof(int);
-
-  // 反序列化接收方的包编号
-  memcpy(&message.packageNum, tmp, sizeof(int));
-  tmp += sizeof(int);
 }
 
 void Client::createSocket() {
@@ -147,49 +149,53 @@ void Client::setIpAndPort() {
   port = laddr.sin_port;
 }
 
-void sendMessage(my_int socket_d, std::string source_ip, my_int source_port, std::string des_ip, my_int des_port, std::string msg) {
+void sendMessage(my_int socket_d, Message& mt) {
   // 如果消息够长，则会造成缓冲区溢出，而且自己定义的数据结构在接收方并不能按照预计的那样去读取，
   // 所以需要将具体的消息手动切片或者补齐
   // 发送信息
   Message message;
-  message.sourceIp = source_ip;
-  message.sourcePort = source_port;
-  message.desIp = des_ip;
-  message.desPort = des_port;
-  message.packageSize = msg.size();
-  int len =
-      BUFSIZE - (sizeof(my_int) + source_ip.length() + sizeof(source_port) + sizeof(my_int) + des_ip.length() + sizeof(des_port) +
-                 sizeof(message.packageSize) + sizeof(message.packageNum) + 1);
+  message.sourceIp = mt.sourceIp;
+  message.sourcePort = mt.sourcePort;
+  message.desIp = mt.desIp;
+  message.desPort = mt.desPort;
+  message.packageSize = mt.message.size();
+  auto msg = mt.message;
+  int LEN =
+      BUFSIZE - (sizeof(my_int) + mt.sourceIp.size() + sizeof(mt.sourcePort) + sizeof(my_int) + mt.desIp.size() + sizeof(mt.desPort) +
+                 sizeof(message.packageSize) + sizeof(message.packageNum));
   int count = 0;
   while (true) {
-    if (msg.size() > len) {
+    if (msg.size() > LEN) {
       message.packageNum = count;
       count++;
-      message.message = msg.substr(0, len);
-      msg = msg.substr(len);
+      message.message = msg.substr(0, LEN);
+      msg = msg.substr(LEN);
       // 将结构体序列化
       char buf[BUFSIZE] = {'\0'};
       // memcpy(buf, &message, sizeof(message));
       serializeStruct(message, buf);
-      buf[BUFSIZE - 1] = '\0';
+      // buf[BUFSIZE - 1] = '\0';
       // write(socket_d, buf, BUFSIZE);
       errno = 0;
       my_int len = 0;
       // std::cout << "fd = " << socket_d << std::endl;
-      while (len < BUFSIZE){
-        my_int n = write(socket_d, buf + len, BUFSIZE - len);
-        if (n < 0){
-          if (errno == EWOULDBLOCK || EAGAIN){
-            // std::cout << "套接字缓冲区满了，不能写入 = " << len << std::endl;
-            // sleep(3);
-            continue;
-          }else{
-            std::cout << "写入错误" << std::endl;
-            perror("write");
-            exit(-1);
+      {
+        // std::unique_lock<std::mutex> lock(mtx);
+        while (len < BUFSIZE){
+          my_int n = write(socket_d, buf + len, BUFSIZE - len);
+          if (n < 0){
+            if (errno == EWOULDBLOCK || EAGAIN){
+              // std::cout << "套接字缓冲区满了，不能写入 = " << len << std::endl;
+              // sleep(3);
+              continue;
+            }else{
+              std::cout << "写入错误" << std::endl;
+              perror("write");
+              exit(-1);
+            }
           }
+          len += n;
         }
-        len += n;
       }
       // send(socket_d, buf, BUFSIZE, 0);
     } else {
@@ -199,29 +205,117 @@ void sendMessage(my_int socket_d, std::string source_ip, my_int source_port, std
       char buf[BUFSIZE] = {'\0'};
       // memcpy(buf, &message, sizeof(message));
       serializeStruct(message, buf);
-      buf[BUFSIZE - 1] = '\0';
+      // buf[BUFSIZE - 1] = '\0';
       // write(socket_d, buf, BUFSIZE);
       errno = 0;
       my_int len = 0;
       // std::cout << "fd = " << socket_d << std::endl;
-      while (len < BUFSIZE){
-        my_int n = write(socket_d, buf + len, BUFSIZE - len);
-        if (n < 0){
-          if (errno == EWOULDBLOCK || EAGAIN){
-            std::cout << "套接字缓冲区满了，不能写入 = " << len << std::endl;
-            // sleep(3);
-            continue;
-          }else{
-            std::cout << "写入错误" << std::endl;
-            perror("write");
-            exit(-1);
+      {
+        // std::unique_lock<std::mutex> lock(mtx);
+        while (len < BUFSIZE){
+          my_int n = write(socket_d, buf + len, BUFSIZE - len);
+          if (n < 0){
+            if (errno == EWOULDBLOCK || EAGAIN){
+              // std::cout << "套接字缓冲区满了，不能写入 = " << len << std::endl;
+              // sleep(3);
+              continue;
+            }else{
+              std::cout << "写入错误" << std::endl;
+              perror("write");
+              exit(-1);
+            }
           }
+          len += n;
         }
-        len += n;
       }
-      std::cout << "写入成功" << std::endl;
+      // std::cout << "写入成功" << std::endl;
       // send(socket_d, buf, BUFSIZE, 0);
       break;
+    }
+  }
+}
+
+void Client::sendMessage() {
+  // 如果消息够长，则会造成缓冲区溢出，而且自己定义的数据结构在接收方并不能按照预计的那样去读取，
+  // 所以需要将具体的消息手动切片或者补齐
+  // 发送信息
+  auto tmpstr = msg;
+  Message message;
+  message.sourceIp = ip;
+  message.sourcePort = port;
+  message.desIp = server_ip;
+  message.desPort = server_port;
+  message.packageSize = tmpstr.size();
+  int LEN =
+      BUFSIZE - (sizeof(my_int) + ip.size() + sizeof(port) + sizeof(my_int) + server_ip.size() + sizeof(server_port) +
+                 sizeof(message.packageSize) + sizeof(message.packageNum));
+  int count = 0;
+  {
+    // std::unique_lock<std::mutex> lock(mtx);
+    while (true) {
+      if (tmpstr.size() > LEN) {
+        message.packageNum = count;
+        count++;
+        message.message = tmpstr.substr(0, LEN);
+        tmpstr = tmpstr.substr(LEN);
+        // 将结构体序列化
+        char buf[BUFSIZE] = {'\0'};
+        // memcpy(buf, &message, sizeof(message));
+        serializeStruct(message, buf);
+        // buf[BUFSIZE - 1] = '\0';
+        // write(socket_d, buf, BUFSIZE);
+        errno = 0;
+        my_int len = 0;
+        // std::cout << "fd = " << socket_d << std::endl;
+        while (len < BUFSIZE){
+          my_int n = write(socket_d, buf + len, BUFSIZE - len);
+          if (n < 0){
+            if (errno == EWOULDBLOCK || EAGAIN){
+              // std::cout << "套接字缓冲区满了，不能写入 = " << len << std::endl;
+              // sleep(3);
+              continue;
+            }else{
+              std::cout << "写入错误" << std::endl;
+              perror("write");
+              exit(-1);
+            }
+          }
+          len += n;
+        }
+        // std::cout << "写入成功" << std::endl;
+        // send(socket_d, buf, BUFSIZE, 0);
+      } else {
+        message.message = tmpstr;
+        message.packageNum = count;
+        // 将结构体序列化
+        char buf[BUFSIZE] = {'\0'};
+        // memcpy(buf, &message, sizeof(message));
+        serializeStruct(message, buf);
+        // buf[BUFSIZE - 1] = '\0';
+        // write(socket_d, buf, BUFSIZE);
+        errno = 0;
+        my_int len = 0;
+        // std::cout << "fd = " << socket_d << std::endl;
+        while (len < BUFSIZE){
+          my_int n = write(socket_d, buf + len, BUFSIZE - len);
+          if (n < 0){
+            if (errno == EWOULDBLOCK || EAGAIN){
+              // std::cout << "套接字缓冲区满了，不能写入 = " << len << std::endl;
+              // sleep(3);
+              continue;
+            }else{
+              std::cout << "写入错误" << std::endl;
+              perror("write");
+              exit(-1);
+            }
+          }
+          len += n;
+        }
+        
+        // std::cout << "写入成功" << std::endl;
+        // send(socket_d, buf, BUFSIZE, 0);
+        break;
+      }
     }
   }
 }
@@ -367,7 +461,9 @@ std::mutex mutex_infos;
 std::mutex mutex_epollfd;
 std::mutex mutex_task;
 
-void RelayServer::coroutineFunction(std::shared_ptr<char> strs, my_int fd) {
+std::mutex mutex_combine; // 组包的锁
+
+void RelayServer::coroutineFunction(Message message, my_int fd) {
   // while (true) {
   int closeFlag = 0;
   // 检查套接字的FIN标志位，是否产生粘包
@@ -382,10 +478,6 @@ void RelayServer::coroutineFunction(std::shared_ptr<char> strs, my_int fd) {
   //   std::cout << "标志位被设置了" << std::endl;
   // }
 
-  // 真正在传输数据
-  Message message;
-  // memcpy(&message, buf, sizeof(Message));
-  deserializeStruct(strs.get(), message);
   // 在红黑树中查找信息，如果不存在就需要构建信息，并放入到红黑树中
   my_int sendfd;
   {
@@ -427,26 +519,7 @@ void RelayServer::coroutineFunction(std::shared_ptr<char> strs, my_int fd) {
     s->second.push_back(std::to_string(fd));
   }
   // 转发消息
-  // std::cout << "转发数据到" << sendfd << std::endl;
-  // write(sendfd, strs.get(), BUFSIZE);
-  errno = 0;
-  my_int len = 0;
-  // std::cout << "fd = " << socket_d << std::endl;
-  while (len < BUFSIZE){
-    my_int n = write(sendfd, strs.get() + len, BUFSIZE - len);
-    if (n < 0){
-      if (errno == EWOULDBLOCK || EAGAIN){
-        // std::cout << "套接字缓冲区满了，不能写入 = " << len << std::endl;
-        // sleep(3);
-        continue;
-      }else{
-        std::cout << "写入错误" << std::endl;
-        perror("write");
-        exit(-1);
-      }
-    }
-    len += n;
-  }
+  sendMessage(sendfd, message);
   // printf("%p\n", strs);
   // send(sendfd, strs, BUFSIZE, 0);
   // 任务处理完成减少fd相关的任务数量记录
@@ -485,7 +558,7 @@ void RelayServer::coroutineFunction(std::shared_ptr<char> strs, my_int fd) {
 #endif
   // 判断是不是要执行关闭
   if (closeFlag) {
-    std::cout << "线程中真正关闭" << std::endl;
+    // std::cout << "线程中真正关闭" << std::endl;
     {
       auto its = infos.find(std::to_string(fd));
       if (its == infos.end()){
@@ -507,6 +580,14 @@ void RelayServer::coroutineFunction(std::shared_ptr<char> strs, my_int fd) {
         std::cout << "s->second中找不到" << std::endl;
       }
       s->second.erase(ele);
+    }
+    {
+      std::unique_lock<std::mutex> lock(mutex_combine);
+      auto it = MessageInfo.find(fd);
+      if (it == MessageInfo.end()){
+        std::cout << "删除连接时MessageInfo中找不到" << std::endl;
+      }
+      MessageInfo.erase(it);
     }
   }
   // }
@@ -571,7 +652,7 @@ void RelayServer::recvMsg() {
         std::cout << "客户端请求连接" << std::endl;
         socklen_t len = sizeof(raddr);
         my_int newsd =
-            accept(socket_d, (struct sockaddr *__restrict)&raddr, &len);
+            accept(fd, (struct sockaddr *__restrict)&raddr, &len);
         if (newsd < 0) {
           if (errno == EWOULDBLOCK) {
             // 表明本次通知的待处理事件全部处理完成
@@ -595,6 +676,12 @@ void RelayServer::recvMsg() {
         event.data.fd = newsd;
         event.events = EPOLLIN;
         epoll_ctl(epollfd, EPOLL_CTL_ADD, newsd, &event);
+        // 构建包消息
+        std::vector<std::vector<std::string>> v;
+        {
+          std::unique_lock<std::mutex> lock(mutex_combine);
+          MessageInfo.insert({newsd, v});
+        }
         // 先查询fd_tasks中是不是已经存在fd
         {
           std::unique_lock<std::mutex> lock(mutex_task);
@@ -609,7 +696,7 @@ void RelayServer::recvMsg() {
       } else {
         // 表明是已经建立的连接要通信，而不是客户端请求连接
         // 把数据读出来
-        std::cout << "数据通信" << std::endl;
+        // std::cout << "数据通信" << std::endl;
         char buf[BUFSIZE];
         // int len = read(fd, buf, BUFSIZE);
         int len = 0, n = 0;
@@ -655,7 +742,7 @@ void RelayServer::recvMsg() {
               }
             } else {
               // 就在epoll中执行关闭
-              std::cout << "epoll中真正关闭" << std::endl;
+              // std::cout << "epoll中真正关闭" << std::endl;
               it->second["state"] = 0;
               auto its = infos.find(std::to_string(fd));
               // 如果没有找到，表明是刚建立连接还没有数据通信就请求关闭
@@ -687,39 +774,129 @@ void RelayServer::recvMsg() {
                 }
               }
               close(fd);
+              // 删除MessageInfo中的消息
+              {
+                std::unique_lock<std::mutex> lock(mutex_combine);
+                auto it = MessageInfo.find(fd);
+                if (it == MessageInfo.end()) {
+                  std::cout << "MessageInfo中找不到" << std::endl;
+                }
+                MessageInfo.erase(it);
+              }
             }
           }
         } else if (len < 0) {
           std::cout << "epoll读取异常" << std::endl;
         } else {
-            // std::cout << "添加任务 " << fd << std::endl;
-            // 把任务加入任务队列
-            // 记录套接字相关的任务数
-            // 先查询fd_tasks中是不是已经存在fd
-            {
-              std::unique_lock<std::mutex> lock(mutex_task);
-              auto it = fd_tasks.find(fd);
-              if (it == fd_tasks.end()) {
-                std::cout << "没找到===" << std::endl;
+          //消息处理，每个线程接收到的消息只是一个包，有些发送方的消息不只是只有一个包，所有线程之间要协作组合包
+          //1、先判断这个包是不是不需要和其他包组合
+          Message message;
+          deserializeStruct(buf, message);
+          {
+            // std::unique_lock<std::mutex> lock(mutex_combine);
+            if (message.packageSize == message.message.size()) {
+              // 不需要组包，直接把消息添加到任务池中
+              // sendMessage(sendfd, message);
+              {
+                std::unique_lock<std::mutex> lock(mutex_task);
+                auto it = fd_tasks.find(fd);
+                if (it == fd_tasks.end()) {
+                  std::cout << "没找到===" << std::endl;
+                }
+                // 表明存在fd，需要判断fd是不是可重用的
+                if (it->second["state"] == 1) {
+                  // 表明状态是可用的
+                  it->second["number"]++;
+                } else {
+                  // 不可重用（此种情况是已经被用过，但是用完了）
+                  it->second["state"] = 1;
+                  it->second["number"] = 1;
+                  it->second["isclose"] = 0;
+                }
               }
-              // 表明存在fd，需要判断fd是不是可重用的
-              if (it->second["state"] == 1) {
-                // 表明状态是可用的
-                it->second["number"]++;
+              // std::cout << "加入线程池" << std::endl;
+              threadPool->enqueue([this, strs = message, tmpfd = fd]() {
+                coroutineFunction(strs, tmpfd);
+              });
+            } else {
+              // 2、需要组合，再次判断是不是本次消息的最后一个包，如果是那么就要把所有包拿出来组合消息，然后打印到终端，
+              // 如果不是最后一个包，那么就需要把包插入到合适的位置
+              auto it = MessageInfo.find(fd);
+              int lent = 0;
+              for (auto p : it->second) {
+                lent += p[1].size();
+              }
+              lent += message.message.size();
+              // std::cout << "lenttt = " << lent << " " << message.packageSize << std::endl;
+              if (lent == message.packageSize) {
+                // puts("最后一个包");
+                // 表明是最后一个包
+                // 组装包消息
+                std::string pkgStrs = "";
+                for (auto pkg : it->second) {
+                  pkgStrs += pkg[1];
+                }
+                // 组装完成，转发消息
+                message.message = pkgStrs;
+                {
+                  std::unique_lock<std::mutex> lock(mutex_task);
+                  auto it = fd_tasks.find(fd);
+                  if (it == fd_tasks.end()) {
+                    std::cout << "没找到===" << std::endl;
+                  }
+                  // 表明存在fd，需要判断fd是不是可重用的
+                  if (it->second["state"] == 1) {
+                    // 表明状态是可用的
+                    it->second["number"]++;
+                  } else {
+                    // 不可重用（此种情况是已经被用过，但是用完了）
+                    it->second["state"] = 1;
+                    it->second["number"] = 1;
+                    it->second["isclose"] = 0;
+                  }
+                }
+                // std::cout << "加入线程池" << std::endl;
+                threadPool->enqueue([this, strs = message, tmpfd = fd]() {
+                  coroutineFunction(strs, tmpfd);
+                });
+                // 删除MessageInfo中的包消息
+                it->second.clear();
               } else {
-                // 不可重用（此种情况是已经被用过，但是用完了）
-                it->second["state"] = 1;
-                it->second["number"] = 1;
-                it->second["isclose"] = 0;
+                // 输出message
+                // std::cout << "message = " << message.message << std::endl;
+                // 表明不是最后一个包，需要把包插入到合适的位置
+                std::vector<std::string> v;
+                v.push_back(std::to_string(message.packageNum));
+                v.push_back(message.message);
+                if (it->second.size() == 0) {
+                  // 直接插入
+                  it->second.push_back(v);
+                } else {
+                  int f = 0;
+                  std::vector<std::vector<std::string>>::iterator index; // 用于记录插入位置
+                  for (auto pkg = it->second.begin(); pkg != it->second.end(); ++pkg) {
+                    // std::cout << "进入" << std::stoi(*(pkg->begin())) << " " << message.packageNum << std::endl;
+                    if (message.packageNum < std::stoi(*(pkg->begin()))) {
+                      f = 1;
+                      index = pkg;
+                    }
+                  }
+                  // puts("测试");
+                  if (f == 0) {
+                    // 直接在末尾插入
+                    it->second.push_back(v);
+                  }else{
+                    it->second.insert(index, v);
+                  }
+                  // puts("结束");
+                }
               }
             }
-            std::shared_ptr<char> tmp(new char[BUFSIZE]);
-            // std::cout << "加入线程池===" << std::endl;
-            memcpy(tmp.get(), buf, BUFSIZE);
-            // std::cout << "加入线程池" << std::endl;
-            threadPool->enqueue([this, strs = tmp, tmpfd = fd]() {
-              coroutineFunction(strs, tmpfd);
-            });
+          }
+          // std::cout << "添加任务 " << fd << std::endl;
+          // 把任务加入任务队列
+          // 记录套接字相关的任务数
+          // 先查询fd_tasks中是不是已经存在fd
         }
       }
     }
@@ -752,76 +929,14 @@ void Server::createSocket() {
   }
 }
 
-std::mutex mutex_combine; // 组包的锁
 
-void Server::recvTask(std::shared_ptr<char> strs, my_int fd) {
+void Server::recvTask(Message message, my_int fd) {
   // while (true) {
   int closeFlag = 0;
   // 真正在传输数据
   // std::cout << "数据" << std::endl;
-  Message message;
-  deserializeStruct(strs.get(), message);
-  // 消息解析完成
-  // delete[] strs;
-  // std::cout << "解析完成" << std::endl;
-  //消息处理，每个线程接收到的消息只是一个包，有些发送方的消息不只是只有一个包，所有线程之间要协作组合包
-  //1、先判断这个包是不是不需要和其他包组合
-  {
-    std::unique_lock<std::mutex> lock(mutex_combine);
-    if (message.packageSize == message.message.size()) {
-      std::cout << "不需要组合，消息 = " << message.message << std::endl;
-    } else {
-      // 2、需要组合，再次判断是不是本次消息的最后一个包，如果是那么就要把所有包拿出来组合消息，然后打印到终端，
-      // 如果不是最后一个包，那么就需要把包插入到合适的位置
-      auto it = MessageInfo.find(fd);
-      int len = 0;
-      for (auto p : it->second) {
-        len += p[1].size();
-      }
-      len += message.message.size();
-      std::cout << "len = " << len << " " << message.packageSize << std::endl;
-      if (len == message.packageSize) {
-        puts("最后一个包");
-        // 表明是最后一个包
-        // 组装包消息
-        std::string pkgStrs = "";
-        for (auto pkg : it->second) {
-          pkgStrs += pkg[1];
-        }
-        // 组装完成，打印消息
-        std::cout << "组合之后，消息 = " << pkgStrs << std::endl;
-        // 删除MessageInfo中的包消息
-        it->second.clear();
-      } else {
-        // 输出message
-        // std::cout << "packageNum = " << message.packageNum << std::endl;
-        // std::cout << "message = " << message.message << std::endl;
-        // 表明不是最后一个包，需要把包插入到合适的位置
-        std::vector<std::string> v;
-        v.push_back(std::to_string(message.packageNum));
-        v.push_back(message.message);
-        if (it->second.size() == 0) {
-          // 直接插入
-          it->second.push_back(v);
-        } else {
-          int f = 0;
-          for (auto pkg = it->second.begin(); pkg != it->second.end(); ++pkg) {
-            std::cout << "进入" << std::stoi((*pkg)[0]) << " " << message.packageNum << std::endl;
-            if (message.packageNum < std::stoi((*pkg)[0])) {
-              f = 1;
-              it->second.insert(pkg, v);
-            }
-          }
-          puts("测试");
-          if (f == 0) {
-            // 直接在末尾插入
-            it->second.push_back(v);
-          }
-          puts("结束");
-        }
-      }
-    }
-  }
+  // 输出消息
+  // std::cout << "消息 = " << message.message << std::endl;
   {
     std::unique_lock<std::mutex> lock(mutex_task);
     auto it = fd_tasks.find(fd);
@@ -834,9 +949,12 @@ void Server::recvTask(std::shared_ptr<char> strs, my_int fd) {
   }
   if (closeFlag) {  // 删除MessageInfo中的消息
     std::cout << "线程中真正关闭" << std::endl;
-    auto it = MessageInfo.find(fd);
     {
       std::unique_lock<std::mutex> lock(mutex_combine);
+      auto it = MessageInfo.find(fd);
+      if (it == MessageInfo.end()){
+        std::cout << "删除连接时MessageInfo中找不到" << std::endl;
+      }
       MessageInfo.erase(it);
     }
     close(fd);
@@ -883,7 +1001,7 @@ void Server::recvMessage() {
         // while (true) {
         socklen_t len = sizeof(raddr);
         my_int newsd =
-            accept(socket_d, (struct sockaddr *__restrict)&raddr, &len);
+            accept(fd, (struct sockaddr *__restrict)&raddr, &len);
         if (newsd < 0) {
           if (errno == EWOULDBLOCK) {
             // 表明本次通知的待处理事件全部处理完成
@@ -987,12 +1105,12 @@ void Server::recvMessage() {
               }
               close(fd);
               // 删除MessageInfo中的消息
-              auto it = MessageInfo.find(fd);
-              if (it == MessageInfo.end()) {
-                std::cout << "MessageInfo中找不到" << std::endl;
-              }
               {
                 std::unique_lock<std::mutex> lock(mutex_combine);
+                auto it = MessageInfo.find(fd);
+                if (it == MessageInfo.end()) {
+                  std::cout << "MessageInfo中找不到" << std::endl;
+                }
                 MessageInfo.erase(it);
               }
             }
@@ -1002,28 +1120,103 @@ void Server::recvMessage() {
         } else if (len < 0) {
           std::cout << "epoll读取异常" << std::endl;
         } else {
+          //消息处理，每个线程接收到的消息只是一个包，有些发送方的消息不只是只有一个包，所有线程之间要协作组合包
+          //1、先判断这个包是不是不需要和其他包组合
+          Message message;
+          deserializeStruct(buf, message);
+          {
+            // std::unique_lock<std::mutex> lock(mutex_combine);
+            if (message.packageSize == message.message.size()) {
+              // std::cout << "不需要组合，消息 = " << message.message << std::endl;
+              {
+                std::unique_lock<std::mutex> lock(mutex_task);
+                auto it = fd_tasks.find(fd);
+                // 表明存在fd，需要判断fd是不是可重用的
+                if (it->second["state"] == 1) {
+                  // 表明状态是可用的
+                  it->second["number"]++;
+                } else {
+                  it->second["state"] = 1;
+                  it->second["number"] = 1;
+                  it->second["isclose"] = 0;
+                }
+              }
+              threadPool->enqueue(
+                  [this, strs = message, fd]() mutable { recvTask(strs, fd); });
+            } else {
+              // 2、需要组合，再次判断是不是本次消息的最后一个包，如果是那么就要把所有包拿出来组合消息，然后打印到终端，
+              // 如果不是最后一个包，那么就需要把包插入到合适的位置
+              auto it = MessageInfo.find(fd);
+              int lent = 0;
+              for (auto p : it->second) {
+                lent += p[1].size();
+              }
+              lent += message.message.size();
+              if (lent == message.packageSize) {
+                puts("最后一个包");
+                // 表明是最后一个包
+                // 组装包消息
+                std::string pkgStrs = "";
+                for (auto pkg : it->second) {
+                  pkgStrs += pkg[1];
+                }
+                // 组装完成，打印消息
+                message.message = pkgStrs;
+                {
+                  std::unique_lock<std::mutex> lock(mutex_task);
+                  auto it = fd_tasks.find(fd);
+                  // 表明存在fd，需要判断fd是不是可重用的
+                  if (it->second["state"] == 1) {
+                    // 表明状态是可用的
+                    it->second["number"]++;
+                  } else {
+                    it->second["state"] = 1;
+                    it->second["number"] = 1;
+                    it->second["isclose"] = 0;
+                  }
+                }
+                threadPool->enqueue(
+                    [this, strs = message, fd]() mutable { recvTask(strs, fd); });
+                // 删除MessageInfo中的包消息
+                it->second.clear();
+              } else {
+                // 输出message
+                // std::cout << "packageNum = " << message.packageNum << std::endl;
+                // std::cout << "message = " << message.message << std::endl;
+                // 表明不是最后一个包，需要把包插入到合适的位置
+                std::vector<std::string> v;
+                v.push_back(std::to_string(message.packageNum));
+                v.push_back(message.message);
+                if (it->second.size() == 0) {
+                  // 直接插入
+                  it->second.push_back(v);
+                } else {
+                  int f = 0;
+                  std::vector<std::vector<std::string>>::iterator index; // 用于记录插入位置
+                  for (auto pkg = it->second.begin(); pkg != it->second.end(); ++pkg) {
+                    // std::cout << "进入" << std::stoi(*(pkg->begin())) << " " << message.packageNum << std::endl;
+                    if (message.packageNum < std::stoi(*(pkg->begin()))) {
+                      f = 1;
+                      index = pkg;
+                    }
+                  }
+                  // puts("测试");
+                  if (f == 0) {
+                    // 直接在末尾插入
+                    it->second.push_back(v);
+                  }else{
+                    it->second.insert(index, v);
+                  }
+                  // puts("结束");
+                }
+              }
+            }
+          }
           // while (true) {
           // 把任务加入任务队列
           // 先查询fd_tasks中是不是已经存在fd
           // std::cout << "进入" << std::endl;
-          {
-            std::unique_lock<std::mutex> lock(mutex_task);
-            auto it = fd_tasks.find(fd);
-            // 表明存在fd，需要判断fd是不是可重用的
-            if (it->second["state"] == 1) {
-              // 表明状态是可用的
-              it->second["number"]++;
-            } else {
-              it->second["state"] = 1;
-              it->second["number"] = 1;
-              it->second["isclose"] = 0;
-            }
-          }
-          // char *tmp = new char[BUFSIZE];
-          std::shared_ptr<char> tmp(new char[BUFSIZE]);
-          memcpy(tmp.get(), buf, BUFSIZE);
-          threadPool->enqueue(
-              [this, strs = tmp, fd]() mutable { recvTask(strs, fd); });
+          
         }
       }
     }

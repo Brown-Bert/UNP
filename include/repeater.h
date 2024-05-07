@@ -4,8 +4,10 @@
 #include <unistd.h>
 
 // #include <boost/coroutine2/coroutine.hpp>
+#include <algorithm>
 #include <cstdlib>
 #include <memory>
+#include <mutex>
 #include <string>
 
 #include "threadPool.h"
@@ -53,17 +55,29 @@ class Client {
   std::string server_ip; // 服务器ip
   my_int server_port; // 服务器端口
   std::string msg;  // 每个客户端自己的消息
+  std::mutex mtx;   // 互斥锁.用于多线程发送消息的时候，确保同一时间只有一个线程使用套接字描述符
  public:
   Client(my_int id) : id(id){};
+  Client(const Client& other){
+    id = other.id;
+    count = other.count;
+    socket_d = other.socket_d;
+    ip = other.ip;
+    port = other.port;
+    server_ip = other.server_ip;
+    server_port = other.server_port;
+    msg = other.msg;
+  }
   void createSocket();  // 创建客户端网络套接字描述符
   void
   setIpAndPort();  // 调用createSocket之后使用的是系统默认分配端口和本地ip，使用本函数获取ip和端口填入到类中
   void closefd() {
     close(socket_d);  // 关闭套接字描述符
   }
+  void sendMessage();  // 运行客户端并发送消息，msg:具体要发送的消息
 };
 
-void sendMessage(my_int socket_d, std::string source_ip, my_int source_port, std::string des_ip, my_int des_port, std::string msg);  // 运行客户端并发送消息，msg:具体要发送的消息
+void sendMessage(my_int socket_d, Message& mt);  // 运行客户端并发送消息，msg:具体要发送的消息
 
 typedef struct {
   std::string desIp;  // 目的地的ip
@@ -86,7 +100,8 @@ class RelayServer {
   std::map<my_int, std::map<std::string, my_int>>
       fd_tasks;  // 因为多线程操作同一个描述符，会造成其他线程在处理任务的时候，有一个线程已经接收到了关闭套接字描述符的任务
                  // 为了确保关闭套接字之前，关于套接字的任务全部执行完毕，需要记录套接字相关的任务数量，以及套接字的状态：可用与不可用
-
+  std::map<my_int, std::vector<std::vector<std::string>>>
+      MessageInfo;  // 用于存放包的信息，中继服务器也需要组包，不然多线程环境下不能保证包到达对面的顺序
  public:
   RelayServer();  // 初始化中继服务器的同时初始化servers变量，并且单独开出一个线程用于输出信息
   ~RelayServer() {
@@ -103,7 +118,7 @@ class RelayServer {
       my_int threadNum);  // 创建线程池, threadNum 线程池初始化时的线程个数
   void
   searchThread();  // 中继服务器上创建一个线程，用于返回给特定请求中继服务器管理的客户端与服务器的情况以及详细信息
-  void coroutineFunction(std::shared_ptr<char> strs, my_int fd);
+  void coroutineFunction(Message message, my_int fd);
   void myConnect(my_int fd, std::string desIp,
                  my_int desPort);  // 连接远程服务器
 };
@@ -125,7 +140,7 @@ class Server {
   ~Server() { delete threadPool; }
   Server(my_int port, std::string ip) : ip(ip), port(port){};
   void createSocket();  // 创建客户端网络套接字描述符
-  void recvTask(std::shared_ptr<char> strs, my_int fd);
+  void recvTask(Message message, my_int fd);
   void recvMessage();  // 运行客户端并发送消息，msg:具体要发送的消息
   std::map<my_int, std::map<std::string, my_int>>
       fd_tasks;  // 因为多线程操作同一个描述符，会造成其他线程在处理任务的时候，有一个线程已经接收到了关闭套接字描述符的任务
