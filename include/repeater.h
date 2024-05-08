@@ -18,13 +18,15 @@
 #include <vector>
 
 // #include "coroutine.h"
-#define SERVERIP "192.168.1.236"  // 中继器ip
-#define SERVERPORT 8888           // 中继器端口
-#define REVENTSSIZE 10240
-#define BUFSIZE 2048             // 缓冲区的大小
-#define serverPortStart 5000     // 服务器起始端口
-#define serverNum 100            // 开启100台服务器
-#define serverIp "192.168.1.89"  // 暂时只考虑所有服务器的ip相同
+// #define SERVERIP "192.168.1.236"  // 中继器ip
+#define SERVERIP "127.0.0.1"  // 中继器ip(本地测试)
+#define SERVERPORT 8888       // 中继器端口
+#define REVENTSSIZE 10240      // 监听事件的最大数量
+#define BUFSIZE 2048          // 缓冲区的大小
+#define serverPortStart 40000  // 服务器起始端口
+#define serverNum 40          // 开启100台服务器
+// #define serverIp "192.168.1.89"  // 暂时只考虑所有服务器的ip相同
+#define serverIp "127.0.0.1" // 本地测试
 #define searchPort 9999
 #define FLAG \
   true  // true : 允许服务器接收来自多个客户端的连接请求 false :
@@ -139,6 +141,7 @@ class Server {
   ThreadPool* threadPool;  // 线程池
   std::map<my_int, std::vector<std::vector<std::string>>>
       MessageInfo;  // 用于存放包的信息
+  std::vector<std::string> DelayTime; //计算消息时延
  public:
   ~Server() { delete threadPool; }
   Server(my_int port, std::string ip) : ip(ip), port(port){};
