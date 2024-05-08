@@ -7,16 +7,16 @@ add_compile_options(-O0)
 add_library(library repeater.cpp)
 
 add_executable(clientmain clientmain.cpp)
-target_link_libraries(clientmain library)
+target_link_libraries(clientmain library -lpthread)
 
 add_executable(relaymain relaymain.cpp)
-target_link_libraries(relaymain library)
+target_link_libraries(relaymain library -lpthread)
 
 add_executable(servermain servermain.cpp)
-target_link_libraries(servermain library)
+target_link_libraries(servermain library -lpthread)
 
 add_executable(searchmain searchmain.cpp)
-target_link_libraries(searchmain library)
+target_link_libraries(searchmain library -lpthread)
 
 add_executable(testclient testclient.cpp)
 add_executable(testserver testserver.cpp)

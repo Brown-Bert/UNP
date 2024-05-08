@@ -18,13 +18,13 @@
 #include <vector>
 
 // #include "coroutine.h"
-#define SERVERIP "127.0.0.1"  // 中继器ip
-#define SERVERPORT 8888       // 中继器端口
-#define REVENTSSIZE 1024
-#define BUFSIZE 2048          // 缓冲区的大小
-#define serverPortStart 5000  // 服务器起始端口
-#define serverNum 10          // 开启100台服务器
-#define serverIp "127.0.0.1"  // 暂时只考虑所有服务器的ip相同
+#define SERVERIP "192.168.1.236"  // 中继器ip
+#define SERVERPORT 8888           // 中继器端口
+#define REVENTSSIZE 10240
+#define BUFSIZE 2048             // 缓冲区的大小
+#define serverPortStart 5000     // 服务器起始端口
+#define serverNum 100            // 开启100台服务器
+#define serverIp "192.168.1.89"  // 暂时只考虑所有服务器的ip相同
 #define searchPort 9999
 #define FLAG \
   true  // true : 允许服务器接收来自多个客户端的连接请求 false :
@@ -40,6 +40,7 @@ typedef struct {
   my_int
       packageNum;  // 包的编号，虽然tcp是先建立通道，再发送消息，底层的包是保证顺序到达，即使因为网络的原因导致包的丢失，tcp会重新发送
                    // 将分隔好的包重组再上交给上一层，但是自定义包这些是保证不了的，而且在服务器是多线程接收，更加保证不了包的顺序
+  std::string timestr;  // 客户端发送消息的时间
 } Message;
 
 /**
@@ -47,18 +48,19 @@ typedef struct {
 */
 class Client {
  public:
-  my_int id;        // 唯一标识一个客户端
-  my_int count;     // 用于每个客户端模拟通信的次数
-  my_int socket_d;  // 用于中继器网络套接字的描述符
-  std::string ip;   // 每个客户端自己ip
-  my_int port;      // 每个客户端自己端口
-  std::string server_ip; // 服务器ip
-  my_int server_port; // 服务器端口
-  std::string msg;  // 每个客户端自己的消息
-  std::mutex mtx;   // 互斥锁.用于多线程发送消息的时候，确保同一时间只有一个线程使用套接字描述符
+  my_int id;              // 唯一标识一个客户端
+  my_int count;           // 用于每个客户端模拟通信的次数
+  my_int socket_d;        // 用于中继器网络套接字的描述符
+  std::string ip;         // 每个客户端自己ip
+  my_int port;            // 每个客户端自己端口
+  std::string server_ip;  // 服务器ip
+  my_int server_port;     // 服务器端口
+  std::string msg;        // 每个客户端自己的消息
+  std::mutex
+      mtx;  // 互斥锁.用于多线程发送消息的时候，确保同一时间只有一个线程使用套接字描述符
  public:
   Client(my_int id) : id(id){};
-  Client(const Client& other){
+  Client(const Client& other) {
     id = other.id;
     count = other.count;
     socket_d = other.socket_d;
@@ -77,7 +79,8 @@ class Client {
   void sendMessage();  // 运行客户端并发送消息，msg:具体要发送的消息
 };
 
-void sendMessage(my_int socket_d, Message& mt);  // 运行客户端并发送消息，msg:具体要发送的消息
+void sendMessage(my_int socket_d,
+                 Message& mt);  // 运行客户端并发送消息，msg:具体要发送的消息
 
 typedef struct {
   std::string desIp;  // 目的地的ip

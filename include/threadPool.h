@@ -20,10 +20,10 @@ class ThreadPool {
             std::unique_lock<std::mutex> lock(mutex);
             condition.wait(lock, [this] { return stop || !tasks.empty(); });
             if (stop && tasks.empty()) {
-              std::cout << "线程退出" << std::endl;
+              // std::cout << "线程退出" << std::endl;
               return;
             }
-            std::cout << "线程剩余任务数量 = " << tasks.size() << std::endl;
+            // std::cout << "线程剩余任务数量 = " << tasks.size() << std::endl;
             task = std::move(tasks.front());
             tasks.pop();
           }
