@@ -18,15 +18,15 @@
 #include <vector>
 
 // #include "coroutine.h"
-// #define SERVERIP "192.168.1.236"  // 中继器ip
-#define SERVERIP "127.0.0.1"  // 中继器ip(本地测试)
+#define SERVERIP "192.168.1.236"  // 中继器ip
+// #define SERVERIP "127.0.0.1"  // 中继器ip(本地测试)
 #define SERVERPORT 8888       // 中继器端口
 #define REVENTSSIZE 10240      // 监听事件的最大数量
 #define BUFSIZE 2048          // 缓冲区的大小
 #define serverPortStart 40000  // 服务器起始端口
 #define serverNum 40          // 开启100台服务器
-// #define serverIp "192.168.1.89"  // 暂时只考虑所有服务器的ip相同
-#define serverIp "127.0.0.1" // 本地测试
+#define serverIp "192.168.1.89"  // 暂时只考虑所有服务器的ip相同
+// #define serverIp "127.0.0.1" // 本地测试
 #define searchPort 9999
 #define FLAG \
   true  // true : 允许服务器接收来自多个客户端的连接请求 false :
@@ -45,16 +45,33 @@ typedef struct {
   std::string timestr;  // 客户端发送消息的时间
 } Message;
 
+class Base{
+public:
+  std::string ip;
+  my_int port;
+  my_int socket_d;
+public:
+  virtual void createSocket() = 0;  // 创建客户端网络套接字描述符
+};
+
+class ServerBase : public Base{
+public:
+  my_int epollfd;          // 记录epoll实例
+  ThreadPool* threadPool = nullptr;  // 线程池
+  std::map<my_int, std::vector<std::vector<std::string>>>
+      MessageInfo;  // 用于存放包的信息，中继服务器也需要组包，不然多线程环境下不能保证包到达对面的顺序
+public:
+  virtual void recvTask(Message message, my_int fd) = 0;
+  virtual void recvMessage() = 0;  // 运行客户端并发送消息，msg:具体要发送的消息
+};
+
 /**
     客户端
 */
-class Client {
+class Client : public Base{
  public:
   my_int id;              // 唯一标识一个客户端
   my_int count;           // 用于每个客户端模拟通信的次数
-  my_int socket_d;        // 用于中继器网络套接字的描述符
-  std::string ip;         // 每个客户端自己ip
-  my_int port;            // 每个客户端自己端口
   std::string server_ip;  // 服务器ip
   my_int server_port;     // 服务器端口
   std::string msg;        // 每个客户端自己的消息
@@ -72,7 +89,7 @@ class Client {
     server_port = other.server_port;
     msg = other.msg;
   }
-  void createSocket();  // 创建客户端网络套接字描述符
+  void createSocket() override;  // 创建客户端网络套接字描述符
   void
   setIpAndPort();  // 调用createSocket之后使用的是系统默认分配端口和本地ip，使用本函数获取ip和端口填入到类中
   void closefd() {
@@ -94,19 +111,15 @@ typedef struct {
   中继服务器
 */
 extern ThreadPool* RelayThreadPool;
-class RelayServer {
+class RelayServer : public ServerBase {
  public:
   my_int socket_d;                    // 中继服务器的套接字描述符
   std::map<std::string, Info> infos;  // 用红黑树存储客户端与服务器配对的信息
   std::map<std::string, std::vector<std::string>>
       servers;             // 存储客户端与服务器的对应关系
-  my_int epollfd;          // 记录epoll实例
-  ThreadPool* threadPool;  // 线程池
   std::map<my_int, std::map<std::string, my_int>>
       fd_tasks;  // 因为多线程操作同一个描述符，会造成其他线程在处理任务的时候，有一个线程已经接收到了关闭套接字描述符的任务
                  // 为了确保关闭套接字之前，关于套接字的任务全部执行完毕，需要记录套接字相关的任务数量，以及套接字的状态：可用与不可用
-  std::map<my_int, std::vector<std::vector<std::string>>>
-      MessageInfo;  // 用于存放包的信息，中继服务器也需要组包，不然多线程环境下不能保证包到达对面的顺序
  public:
   RelayServer();  // 初始化中继服务器的同时初始化servers变量，并且单独开出一个线程用于输出信息
   ~RelayServer() {
@@ -114,16 +127,17 @@ class RelayServer {
     servers.clear();
     delete threadPool;
   }  // 释放指向线程池的指针
-  my_int createSocket(
+  void createSocket() override; 
+  my_int selfCreateSocket(
       std::string ip, my_int port,
       my_int flag);  // 中继服务器创建套接字描述符, flag = 0;
                      // 表示不需要绑定本地地址，1表示需要绑定本地地址
-  void recvMsg();  // 接收消息
+  void recvMessage() override;  // 接收消息
   void createPool(
       my_int threadNum);  // 创建线程池, threadNum 线程池初始化时的线程个数
   void
   searchThread();  // 中继服务器上创建一个线程，用于返回给特定请求中继服务器管理的客户端与服务器的情况以及详细信息
-  void coroutineFunction(Message message, my_int fd);
+  void recvTask(Message message, my_int fd) override;
   void myConnect(my_int fd, std::string desIp,
                  my_int desPort);  // 连接远程服务器
 };
@@ -131,23 +145,18 @@ class RelayServer {
 /**
   @brief 服务器
 */
-class Server {
- private:
-  std::string ip;  // 每个服务器自己ip
-  my_int port;     // 每个服务器自己端口
+class Server : public ServerBase {
  public:
-  my_int socket_d;         // 用于中继器网络套接字的描述符
-  my_int epollfd;          // 记录epoll实例
-  ThreadPool* threadPool;  // 线程池
-  std::map<my_int, std::vector<std::vector<std::string>>>
-      MessageInfo;  // 用于存放包的信息
   std::vector<std::string> DelayTime; //计算消息时延
  public:
   ~Server() { delete threadPool; }
-  Server(my_int port, std::string ip) : ip(ip), port(port){};
-  void createSocket();  // 创建客户端网络套接字描述符
-  void recvTask(Message message, my_int fd);
-  void recvMessage();  // 运行客户端并发送消息，msg:具体要发送的消息
+  Server(my_int port, std::string ip){
+    this->ip = ip;
+    this->port = port;
+  };
+  void createSocket() override;  // 创建客户端网络套接字描述符
+  void recvTask(Message message, my_int fd) override;
+  void recvMessage() override;  // 运行客户端并发送消息，msg:具体要发送的消息
   std::map<my_int, std::map<std::string, my_int>>
       fd_tasks;  // 因为多线程操作同一个描述符，会造成其他线程在处理任务的时候，有一个线程已经接收到了关闭套接字描述符的任务
   // 为了确保关闭套接字之前，关于套接字的任务全部执行完毕，需要记录套接字相关的任务数量

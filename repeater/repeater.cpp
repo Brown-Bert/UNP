@@ -486,8 +486,8 @@ RelayServer::RelayServer() {
   std::thread t(&RelayServer::searchThread, this);
   t.detach();  // 线程分离
 }
-
-my_int RelayServer::createSocket(std::string ip, my_int port, my_int flag) {
+void RelayServer::createSocket() {}; 
+my_int RelayServer::selfCreateSocket(std::string ip, my_int port, my_int flag) {
   struct sockaddr_in laddr;
   laddr.sin_family = AF_INET;
   inet_pton(AF_INET, ip.c_str(), &laddr.sin_addr.s_addr);
@@ -540,7 +540,7 @@ std::mutex mutex_task;
 
 std::mutex mutex_combine;  // 组包的锁
 
-void RelayServer::coroutineFunction(Message message, my_int fd) {
+void RelayServer::recvTask(Message message, my_int fd) {
   // while (true) {
   int closeFlag = 0;
   // 检查套接字的FIN标志位，是否产生粘包
@@ -566,7 +566,7 @@ void RelayServer::coroutineFunction(Message message, my_int fd) {
       info.desIp = message.desIp;
       info.desPort = message.desPort;
       info.socket_d =
-          createSocket(info.desIp, info.desPort, 0);  // 创建之后发出连接请求
+          selfCreateSocket(info.desIp, info.desPort, 0);  // 创建之后发出连接请求
       sendfd = info.socket_d;
       myConnect(sendfd, info.desIp, info.desPort);
       // 设置成非阻塞IO
@@ -631,7 +631,7 @@ void RelayServer::coroutineFunction(Message message, my_int fd) {
   } else {
     // 表明这台服务器已经建立了连接不能再次建立连接
     // 把任务再次放入到任务池中
-    relay.threadPool->enqueue(coroutineFunction, fd, relay);
+    relay.threadPool->enqueue(recvTask, fd, relay);
   }
 #endif
   // 判断是不是要执行关闭
@@ -671,7 +671,7 @@ void RelayServer::coroutineFunction(Message message, my_int fd) {
   // }
 }
 
-void RelayServer::recvMsg() {
+void RelayServer::recvMessage() {
   if (listen(socket_d, 100) < 0) {
     perror("listen()");
     close(socket_d);
@@ -898,7 +898,7 @@ void RelayServer::recvMsg() {
               }
               // std::cout << "加入线程池" << std::endl;
               threadPool->enqueue([this, strs = message, tmpfd = fd]() {
-                coroutineFunction(strs, tmpfd);
+                recvTask(strs, tmpfd);
               });
             } else {
               // 2、需要组合，再次判断是不是本次消息的最后一个包，如果是那么就要把所有包拿出来组合消息，然后打印到终端，
@@ -940,7 +940,7 @@ void RelayServer::recvMsg() {
                 }
                 // std::cout << "加入线程池" << std::endl;
                 threadPool->enqueue([this, strs = message, tmpfd = fd]() {
-                  coroutineFunction(strs, tmpfd);
+                  recvTask(strs, tmpfd);
                 });
                 // 删除MessageInfo中的包消息
                 it->second.clear();

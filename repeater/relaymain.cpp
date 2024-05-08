@@ -29,9 +29,9 @@ int main(int argc, char* argv[]) {
   // 创建中继器
   RelayServer relayServer;
   // 创建线程池
-  relayServer.createPool(1000);
-  relayServer.createSocket(SERVERIP, SERVERPORT, 1);
-  relayServer.recvMsg();
+  relayServer.createPool(100);
+  relayServer.selfCreateSocket(SERVERIP, SERVERPORT, 1);
+  relayServer.recvMessage();
   // killThread();
   return 0;
 }
