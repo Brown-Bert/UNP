@@ -27,6 +27,7 @@
 #include <sys/ioctl.h>
 #include <sstream>
 #include <iomanip>
+#include <signal.h>
 
 #include "threadPool.h"
 ThreadPool *RelayThreadPool;
@@ -482,6 +483,7 @@ RelayServer::RelayServer() {
     servers.insert(std::pair<std::string, std::vector<std::string>>(
         std::to_string(serverPortStart + i), v));
   }
+
   // 开启线程
   std::thread t(&RelayServer::searchThread, this);
   t.detach();  // 线程分离
@@ -642,11 +644,6 @@ void RelayServer::recvTask(Message message, my_int fd) {
       if (its == infos.end()) {
         std::cout << "infos中找不到" << std::endl;
       }
-      // 向真正的服务器请求关闭
-      close(its->second.socket_d);
-      std::unique_lock<std::mutex> lock(mutex_infos);
-      infos.erase(its);
-      close(fd);
       // 删除servers中客户端
       auto s = servers.find(std::to_string(its->second.desPort));
       if (s == servers.end()){
@@ -658,6 +655,11 @@ void RelayServer::recvTask(Message message, my_int fd) {
         std::cout << "s->second中找不到" << std::endl;
       }
       s->second.erase(ele);
+      // 向真正的服务器请求关闭
+      close(its->second.socket_d);
+      std::unique_lock<std::mutex> lock(mutex_infos);
+      infos.erase(its);
+      close(fd);
     }
     {
       std::unique_lock<std::mutex> lock(mutex_combine);
@@ -671,14 +673,16 @@ void RelayServer::recvTask(Message message, my_int fd) {
   // }
 }
 
+std::mutex mutex_epoll;
 void RelayServer::recvMessage() {
   if (listen(socket_d, 100) < 0) {
     perror("listen()");
     close(socket_d);
-    servers.clear();
+    // servers.clear();
     delete RelayThreadPool;
     killThread();
-    exit(-1);
+    int state = -1;
+    pthread_exit(&state);
   }
 
   // 把socket_d套接口设置成非阻塞模式
@@ -686,41 +690,49 @@ void RelayServer::recvMessage() {
   // fcntl(socket_d, F_SETFL, flags | O_NONBLOCK);
   // 使用epoll
   struct sockaddr_in raddr;
-  epollfd = epoll_create(4);
-  if (epollfd < 0) {
+  struct epoll_event event;
+  my_int epollfd_t = epoll_create(4);
+  std::vector<my_int> v;
+  epoll_all[epollfd_t] = v;
+  if (epollfd_t < 0) {
     perror("epoll()");
     close(socket_d);
     servers.clear();
     delete RelayThreadPool;
     killThread();
-    exit(-1);
+    int state = -1;
+    pthread_exit(&state);
   }
-  struct epoll_event event;
-  event.data.fd = socket_d;
-  event.events = EPOLLIN;
-  epoll_ctl(epollfd, EPOLL_CTL_ADD, socket_d, &event);
+  if (flaglock){
+    flaglock = false;
+    event.data.fd = socket_d;
+    event.events = EPOLLIN;
+    epoll_ctl(epollfd_t, EPOLL_CTL_ADD, socket_d, &event);
+  }
 
   struct epoll_event revents[REVENTSSIZE];
 
   std::cout << "中继服务器启动" << std::endl;
   while (true) {
-    my_int num = epoll_wait(epollfd, revents, REVENTSSIZE, -1);
+    my_int num = epoll_wait(epollfd_t, revents, REVENTSSIZE, -1);
     if (SIGANLSTOP) {
       // 信号中断
       std::cout << "进入" << std::endl;
       delete RelayThreadPool;
       servers.clear();
+      MessageInfo.clear();
       close(socket_d);
-      close(epollfd);
-      exit(0);
+      close(epollfd_t);
+      fd_tasks.clear();
+      pthread_exit(0);
     }
     if (num < 0) {
       perror("epoll_wait()");
       delete RelayThreadPool;
       servers.clear();
       close(socket_d);
-      close(epollfd);
-      exit(0);
+      close(epollfd_t);
+      pthread_exit(0);
     }
     for (my_int i = 0; i < num; i++) {
       my_int fd = revents[i].data.fd;
@@ -745,8 +757,9 @@ void RelayServer::recvMessage() {
           delete RelayThreadPool;
           servers.clear();
           close(socket_d);
-          close(epollfd);
-          exit(-1);
+          close(epollfd_t);
+          int state = -1;
+          pthread_exit(&state);
         }
         char ip[16];
         inet_ntop(AF_INET, &raddr.sin_addr.s_addr, ip, sizeof(ip));
@@ -757,28 +770,67 @@ void RelayServer::recvMessage() {
         fcntl(newsd, F_SETFL, flags | O_NONBLOCK);
         event.data.fd = newsd;
         event.events = EPOLLIN;
-        epoll_ctl(epollfd, EPOLL_CTL_ADD, newsd, &event);
-        // 构建包消息
-        std::vector<std::vector<std::string>> v;
         {
-          std::unique_lock<std::mutex> lock(mutex_combine);
-          MessageInfo.insert({newsd, v});
+          std::unique_lock<std::mutex> lock(mutex_epoll);
+          auto tp = fd_epollfd.find(newsd);
+          if (tp == fd_epollfd.end()){
+            int ep_f = 0;
+            for (auto& ep : epoll_all){
+              if (ep.second.size() < REVENTSSIZE){
+                epoll_ctl(ep.first, EPOLL_CTL_ADD, newsd, &event);
+                std::cout << "把 " << newsd << " 加入到 =" << ep.first << std::endl; 
+                ep.second.push_back(newsd);
+                fd_epollfd[newsd] = ep.first;
+                ep_f = 1;
+                // 构建包消息
+                std::vector<std::vector<std::string>> v;
+                {
+                  std::unique_lock<std::mutex> lock(mutex_combine);
+                  MessageInfo.insert({newsd, v});
+                }
+                // 先查询fd_tasks中是不是已经存在fd
+                {
+                  std::unique_lock<std::mutex> lock(mutex_task);
+                  // fd_tasks中不存在fd，需要新建
+                  std::map<std::string, my_int> m;
+                  m["number"] = 1;
+                  m["state"] = 1;
+                  m["isclose"] = 0;
+                  fd_tasks[newsd] = m;
+                }
+                break;
+              }
+            }
+            if (ep_f == 0){
+              puts("epoll监听满了");
+              // 表明所有的epoll管理器都满了，需要新建一个epoll管理器
+              // epollfd = epoll_create(4);
+              // std::vector<my_int> v;
+              // epoll_all[epollfd] = v;
+              // if (epollfd < 0) {
+              //   perror("epoll()");
+              //   close(socket_d);
+              //   servers.clear();
+              //   delete RelayThreadPool;
+              //   killThread();
+              //   int state = -1;
+              //   pthread_exit(&state);
+              // }
+              // struct epoll_event event;
+              // event.data.fd = socket_d;
+              // event.events = EPOLLIN;
+              // epoll_ctl(epollfd, EPOLL_CTL_ADD, socket_d, &event);
+              // epoll_ctl(epollfd, EPOLL_CTL_ADD, newsd, &event);
+              // fd_epollfd[newsd]
+            }
+          }
         }
-        // 先查询fd_tasks中是不是已经存在fd
-        {
-          std::unique_lock<std::mutex> lock(mutex_task);
-          // fd_tasks中不存在fd，需要新建
-          std::map<std::string, my_int> m;
-          m["number"] = 1;
-          m["state"] = 1;
-          m["isclose"] = 0;
-          fd_tasks[newsd] = m;
-        }
+        // std::cout << "结束" << std::endl;
         // }
       } else {
         // 表明是已经建立的连接要通信，而不是客户端请求连接
         // 把数据读出来
-        // std::cout << "数据通信" << std::endl;
+        // std::cout << "数据通信 = " << epollfd_t << std::endl;
         char buf[BUFSIZE];
         // int len = read(fd, buf, BUFSIZE);
         int len = 0, n = 0;
@@ -816,11 +868,16 @@ void RelayServer::recvMessage() {
               it->second["state"] = 0;
               {
                 std::unique_lock<std::mutex> lock(mutex_epollfd);
-                if (epoll_ctl(epollfd, EPOLL_CTL_DEL, fd,
+                if (epoll_ctl(epollfd_t, EPOLL_CTL_DEL, fd,
                               NULL) <
                     0) {  // 把要监听的客户端套接字描述符从epoll实例中剔除
                   std::cerr << "删除失败" << std::endl;
                 }
+                auto d_fd = fd_epollfd.find(fd);
+                auto iter = epoll_all.find(d_fd->second);
+                auto p = std::find(iter->second.begin(), iter->second.end(), fd);
+                iter->second.erase(p);
+                fd_epollfd.erase(d_fd);
               }
             } else {
               // 就在epoll中执行关闭
@@ -829,12 +886,6 @@ void RelayServer::recvMessage() {
               auto its = infos.find(std::to_string(fd));
               // 如果没有找到，表明是刚建立连接还没有数据通信就请求关闭
               if (its != infos.end()) {
-                // 向真正的服务器请求关闭
-                close(its->second.socket_d);
-                {
-                  std::unique_lock<std::mutex> lock(mutex_infos);
-                  infos.erase(its);
-                }
                 // 删除servers中客户端
                 auto s = servers.find(std::to_string(its->second.desPort));
                 if (s == servers.end()) {
@@ -846,14 +897,25 @@ void RelayServer::recvMessage() {
                 if (ele != s->second.end()) {
                   s->second.erase(ele);
                 }
+                // 向真正的服务器请求关闭
+                close(its->second.socket_d);
+                {
+                  std::unique_lock<std::mutex> lock(mutex_infos);
+                  infos.erase(its);
+                }
               }
               {
                 std::unique_lock<std::mutex> lock(mutex_epollfd);
-                if (epoll_ctl(epollfd, EPOLL_CTL_DEL, fd,
+                if (epoll_ctl(epollfd_t, EPOLL_CTL_DEL, fd,
                               NULL) <
                     0) {  // 把要监听的客户端套接字描述符从epoll实例中剔除
                   std::cerr << "删除失败" << std::endl;
                 }
+                auto d_fd = fd_epollfd.find(fd);
+                auto iter = epoll_all.find(d_fd->second);
+                auto p = std::find(iter->second.begin(), iter->second.end(), fd);
+                iter->second.erase(p);
+                fd_epollfd.erase(d_fd);
               }
               close(fd);
               // 删除MessageInfo中的消息
@@ -874,6 +936,7 @@ void RelayServer::recvMessage() {
           // 1、先判断这个包是不是不需要和其他包组合
           Message message;
           deserializeStruct(buf, message);
+          // std::cout << "进入" << std::endl;
           {
             // std::unique_lock<std::mutex> lock(mutex_combine);
             if (message.packageSize == message.message.size()) {
@@ -882,6 +945,7 @@ void RelayServer::recvMessage() {
               {
                 std::unique_lock<std::mutex> lock(mutex_task);
                 auto it = fd_tasks.find(fd);
+                // std::cout << "任务数量 = " << it->second["number"] << std::endl;
                 if (it == fd_tasks.end()) {
                   std::cout << "没找到===" << std::endl;
                 }

@@ -1,5 +1,7 @@
 #include <iostream>
 #include <csignal>
+#include <thread>
+#include <vector>
 
 #include "repeater.h"
 extern ThreadPool* RelayThreadPool;
@@ -31,7 +33,19 @@ int main(int argc, char* argv[]) {
   // 创建线程池
   relayServer.createPool(100);
   relayServer.selfCreateSocket(SERVERIP, SERVERPORT, 1);
-  relayServer.recvMessage();
+  // 多个epoll
+  std::vector<std::thread> EpollHandlers;
+  for (int i = 0; i < 10; i++) {
+    std::thread t(&RelayServer::recvMessage, &relayServer);
+    // EpollHandlers.push_back(std::move(t));
+    t.detach();
+  }
+  // relayServer.recvMessage();
   // killThread();
+  my_int f = 0;
+  std::cin >> f;
+  // for (auto& t : EpollHandlers){
+  //   t.join();
+  // }
   return 0;
 }

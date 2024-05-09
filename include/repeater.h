@@ -21,7 +21,7 @@
 #define SERVERIP "192.168.1.236"  // 中继器ip
 // #define SERVERIP "127.0.0.1"  // 中继器ip(本地测试)
 #define SERVERPORT 8888       // 中继器端口
-#define REVENTSSIZE 10240      // 监听事件的最大数量
+#define REVENTSSIZE 1024      // 监听事件的最大数量
 #define BUFSIZE 2048          // 缓冲区的大小
 #define serverPortStart 40000  // 服务器起始端口
 #define serverNum 40          // 开启100台服务器
@@ -120,12 +120,15 @@ class RelayServer : public ServerBase {
   std::map<my_int, std::map<std::string, my_int>>
       fd_tasks;  // 因为多线程操作同一个描述符，会造成其他线程在处理任务的时候，有一个线程已经接收到了关闭套接字描述符的任务
                  // 为了确保关闭套接字之前，关于套接字的任务全部执行完毕，需要记录套接字相关的任务数量，以及套接字的状态：可用与不可用
+  std::map<my_int, std::vector<my_int>> epoll_all; // 记录每个epoll管理了哪些个描述符
+  std::map<my_int, my_int> fd_epollfd; // 记录每个描述符对应的epollfd
+  my_int flaglock = true;
  public:
   RelayServer();  // 初始化中继服务器的同时初始化servers变量，并且单独开出一个线程用于输出信息
   ~RelayServer() {
     std::cout << "中继服务器析构" << std::endl;
     servers.clear();
-    delete threadPool;
+    // delete threadPool;
   }  // 释放指向线程池的指针
   void createSocket() override; 
   my_int selfCreateSocket(
