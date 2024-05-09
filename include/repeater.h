@@ -18,14 +18,14 @@
 #include <vector>
 
 // #include "coroutine.h"
-#define SERVERIP "192.168.1.236"  // 中继器ip
+#define SERVERIP "192.168.1.89"  // 中继器ip
 // #define SERVERIP "127.0.0.1"  // 中继器ip(本地测试)
 #define SERVERPORT 8888       // 中继器端口
-#define REVENTSSIZE 1024      // 监听事件的最大数量
+#define REVENTSSIZE 400      // 监听事件的最大数量
 #define BUFSIZE 2048          // 缓冲区的大小
 #define serverPortStart 40000  // 服务器起始端口
 #define serverNum 40          // 开启100台服务器
-#define serverIp "192.168.1.89"  // 暂时只考虑所有服务器的ip相同
+#define serverIp "192.168.1.236"  // 暂时只考虑所有服务器的ip相同
 // #define serverIp "127.0.0.1" // 本地测试
 #define searchPort 9999
 #define FLAG \

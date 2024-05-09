@@ -711,7 +711,9 @@ void RelayServer::recvMessage() {
   }
 
   struct epoll_event revents[REVENTSSIZE];
-
+  // 获取当前时间点
+  auto start_time = std::chrono::system_clock::now();
+  my_int count_pkg = 0;
   std::cout << "中继服务器启动" << std::endl;
   while (true) {
     my_int num = epoll_wait(epollfd_t, revents, REVENTSSIZE, -1);
@@ -778,7 +780,7 @@ void RelayServer::recvMessage() {
             for (auto& ep : epoll_all){
               if (ep.second.size() < REVENTSSIZE){
                 epoll_ctl(ep.first, EPOLL_CTL_ADD, newsd, &event);
-                std::cout << "把 " << newsd << " 加入到 =" << ep.first << std::endl; 
+                // std::cout << "把 " << newsd << " 加入到 =" << ep.first << std::endl; 
                 ep.second.push_back(newsd);
                 fd_epollfd[newsd] = ep.first;
                 ep_f = 1;
@@ -852,8 +854,15 @@ void RelayServer::recvMessage() {
           }
           len += n;
         }
+        count_pkg++;
         if (len == 0) {
           puts("客户端请求关闭");
+          // 获取当前时间点
+          auto end_time = std::chrono::system_clock::now();
+          auto delaytime = std::chrono::duration_cast<std::chrono::seconds>(
+      end_time - start_time);
+      std::cout << "平均每秒处理的包数量 = " << count_pkg / delaytime.count()
+                << std::endl;
           // 表明客户端请求关闭
           auto it = fd_tasks.find(fd);
           if (it == fd_tasks.end()) {

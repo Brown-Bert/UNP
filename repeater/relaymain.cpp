@@ -35,7 +35,7 @@ int main(int argc, char* argv[]) {
   relayServer.selfCreateSocket(SERVERIP, SERVERPORT, 1);
   // 多个epoll
   std::vector<std::thread> EpollHandlers;
-  for (int i = 0; i < 10; i++) {
+  for (int i = 0; i < 30; i++) {
     std::thread t(&RelayServer::recvMessage, &relayServer);
     // EpollHandlers.push_back(std::move(t));
     t.detach();
