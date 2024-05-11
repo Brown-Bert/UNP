@@ -2,12 +2,12 @@
 #include <unistd.h>
 
 #include <chrono>
+#include <csignal>
 #include <iostream>
 #include <random>
 #include <string>
 #include <thread>
 #include <vector>
-#include <csignal>
 
 #include "repeater.h"
 #include "threadPool.h"
@@ -15,8 +15,8 @@
 bool CLIENTSTOP = false;
 
 void signalHandler(int signal) {
-    // 释放中继服务器的线程池
-    CLIENTSTOP = true;
+  // 释放中继服务器的线程池
+  CLIENTSTOP = true;
 }
 
 std::string ConstructStringWithByteSize(std::size_t size) {
@@ -27,15 +27,15 @@ std::string ConstructStringWithByteSize(std::size_t size) {
 int main(int argc, char* argv[]) {
   // 注册信号
   struct sigaction sa;
-  sa.sa_handler = signalHandler; // 设置信号处理函数
-  sigemptyset(&sa.sa_mask);      // 清空信号屏蔽字
-  sa.sa_flags = 0;               // 设置默认标志
+  sa.sa_handler = signalHandler;  // 设置信号处理函数
+  sigemptyset(&sa.sa_mask);       // 清空信号屏蔽字
+  sa.sa_flags = 0;                // 设置默认标志
 
   // 注册信号处理程序
   if (sigaction(SIGINT, &sa, NULL) == -1) {
-      std::cerr << "Failed to register signal handler" << std::endl;
-      exit(-1);
-  }else {
+    std::cerr << "Failed to register signal handler" << std::endl;
+    exit(-1);
+  } else {
     std::cout << "信号注册成功" << std::endl;
   }
   // 构造1000个客户端给100个服务器发送消息
@@ -45,13 +45,13 @@ int main(int argc, char* argv[]) {
   }
   my_int startPort = serverPortStart;
   int clientNum = std::stoi(argv[1]);
-  int byteSize = std::stoi(argv[2]);  // 传输的字节大小，单位值B
-  int threadNum = std::stoi(argv[3]); // 线程池的线程数量
+  int byteSize = std::stoi(argv[2]);   // 传输的字节大小，单位值B
+  int threadNum = std::stoi(argv[3]);  // 线程池的线程数量
   // 输出
   std::cout << "clientNum: " << clientNum << std::endl;
   std::cout << "byteSize: " << byteSize << std::endl;
   std::vector<Client> clients;
-  { // 放在域中，为了出域的时候调用线程池的析构函数
+  {  // 放在域中，为了出域的时候调用线程池的析构函数
     // 创建线程池
     // ThreadPool threadPool(threadNum);
     std::string str = ConstructStringWithByteSize(byteSize);
@@ -73,7 +73,7 @@ int main(int argc, char* argv[]) {
       //   client.sendMessage(serverIp, startPort, str);
       //   // std::this_thread::sleep_for(std::chrono::milliseconds(1000));
       // }
-      
+
       // std::cout << i << std::endl;
       // std::this_thread::sleep_for(std::chrono::milliseconds(100));
       // sleep(2);
@@ -101,8 +101,6 @@ int main(int argc, char* argv[]) {
   std::cout << "结束" << std::endl;
   return 0;
 }
-
-
 
 // #include <fcntl.h>
 // #include <unistd.h>
@@ -182,7 +180,7 @@ int main(int argc, char* argv[]) {
 //       //   client.sendMessage(serverIp, startPort, str);
 //       //   // std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 //       // }
-      
+
 //       // std::cout << i << std::endl;
 //       // std::this_thread::sleep_for(std::chrono::milliseconds(100));
 //       // sleep(2);

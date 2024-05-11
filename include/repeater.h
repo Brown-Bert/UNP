@@ -4,9 +4,6 @@
 #include <unistd.h>
 
 // #include <boost/coroutine2/coroutine.hpp>
-#include <algorithm>
-#include <cstdlib>
-#include <memory>
 #include <mutex>
 #include <string>
 
@@ -18,13 +15,14 @@
 #include <vector>
 
 // #include "coroutine.h"
+// #define SERVERIP "192.168.1.89"  // 中继器ip
 #define SERVERIP "192.168.1.89"  // 中继器ip
 // #define SERVERIP "127.0.0.1"  // 中继器ip(本地测试)
-#define SERVERPORT 8888       // 中继器端口
-#define REVENTSSIZE 10240      // 监听事件的最大数量
-#define BUFSIZE 2048          // 缓冲区的大小
-#define serverPortStart 40000  // 服务器起始端口
-#define serverNum 100          // 开启100台服务器
+#define SERVERPORT 8888           // 中继器端口
+#define REVENTSSIZE 10240         // 监听事件的最大数量
+#define BUFSIZE 2048              // 缓冲区的大小
+#define serverPortStart 40000     // 服务器起始端口
+#define serverNum 100             // 开启100台服务器
 #define serverIp "192.168.1.236"  // 暂时只考虑所有服务器的ip相同
 // #define serverIp "127.0.0.1" // 本地测试
 #define searchPort 9999
@@ -45,22 +43,23 @@ typedef struct {
   std::string timestr;  // 客户端发送消息的时间
 } Message;
 
-class Base{
-public:
+class Base {
+ public:
   std::string ip;
   my_int port;
   my_int socket_d;
-public:
+
+ public:
   virtual void createSocket() = 0;  // 创建客户端网络套接字描述符
 };
 
-class ServerBase : public Base{
-public:
-  my_int epollfd;          // 记录epoll实例
+class ServerBase : public Base {
+ public:
+  my_int epollfd;                    // 记录epoll实例
   ThreadPool* threadPool = nullptr;  // 线程池
   std::map<my_int, std::vector<std::vector<std::string>>>
       MessageInfo;  // 用于存放包的信息，中继服务器也需要组包，不然多线程环境下不能保证包到达对面的顺序
-public:
+ public:
   virtual void recvTask(Message message, my_int fd) = 0;
   virtual void recvMessage() = 0;  // 运行客户端并发送消息，msg:具体要发送的消息
 };
@@ -68,7 +67,7 @@ public:
 /**
     客户端
 */
-class Client : public Base{
+class Client : public Base {
  public:
   my_int id;              // 唯一标识一个客户端
   my_int count;           // 用于每个客户端模拟通信的次数
@@ -98,8 +97,8 @@ class Client : public Base{
   void sendMessage();  // 运行客户端并发送消息，msg:具体要发送的消息
 };
 
-void sendMessage(my_int socket_d,
-                 Message& mt);  // 运行客户端并发送消息，msg:具体要发送的消息
+int sendMessage(my_int socket_d,
+                Message& mt);  // 运行客户端并发送消息，msg:具体要发送的消息
 
 typedef struct {
   std::string desIp;  // 目的地的ip
@@ -116,13 +115,18 @@ class RelayServer : public ServerBase {
   my_int socket_d;                    // 中继服务器的套接字描述符
   std::map<std::string, Info> infos;  // 用红黑树存储客户端与服务器配对的信息
   std::map<std::string, std::vector<std::string>>
-      servers;             // 存储客户端与服务器的对应关系
+      servers;  // 存储客户端与服务器的对应关系
   std::map<my_int, std::map<std::string, my_int>>
       fd_tasks;  // 因为多线程操作同一个描述符，会造成其他线程在处理任务的时候，有一个线程已经接收到了关闭套接字描述符的任务
                  // 为了确保关闭套接字之前，关于套接字的任务全部执行完毕，需要记录套接字相关的任务数量，以及套接字的状态：可用与不可用
-  std::map<my_int, std::vector<my_int>> epoll_all; // 记录每个epoll管理了哪些个描述符
-  std::map<my_int, my_int> fd_epollfd; // 记录每个描述符对应的epollfd
+  std::map<my_int, std::vector<my_int>>
+      epoll_all;  // 记录每个epoll管理了哪些个描述符
+  std::map<my_int, my_int> fd_epollfd;  // 记录每个描述符对应的epollfd
   my_int flaglock = true;
+  std::mutex mutex_send;
+  std::mutex mutex_count;
+  my_int count_pkg = 0;
+
  public:
   RelayServer();  // 初始化中继服务器的同时初始化servers变量，并且单独开出一个线程用于输出信息
   ~RelayServer() {
@@ -130,7 +134,7 @@ class RelayServer : public ServerBase {
     servers.clear();
     // delete threadPool;
   }  // 释放指向线程池的指针
-  void createSocket() override; 
+  void createSocket() override;
   my_int selfCreateSocket(
       std::string ip, my_int port,
       my_int flag);  // 中继服务器创建套接字描述符, flag = 0;
@@ -150,10 +154,10 @@ class RelayServer : public ServerBase {
 */
 class Server : public ServerBase {
  public:
-  std::vector<std::string> DelayTime; //计算消息时延
+  std::vector<std::string> DelayTime;  //计算消息时延
  public:
   ~Server() { delete threadPool; }
-  Server(my_int port, std::string ip){
+  Server(my_int port, std::string ip) {
     this->ip = ip;
     this->port = port;
   };
