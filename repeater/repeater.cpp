@@ -20,6 +20,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <ostream>
 #include <string>
 #include <thread>
 #include <utility>
@@ -46,11 +47,22 @@ std::string timeToStr(std::chrono::system_clock::time_point timePoint) {
   std::time_t time = std::chrono::system_clock::to_time_t(timePoint);
   std::tm *timeInfo = std::localtime(&time);
 
+  // 获取毫秒和微秒级时间间隔
+  auto duration = timePoint.time_since_epoch();
+  auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(duration) % 1000;
+  auto microseconds = std::chrono::duration_cast<std::chrono::microseconds>(duration) % 1000000;
+
   // 格式化时间结构为字符串
   char buffer[80];
   std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", timeInfo);
 
-  return buffer;
+  // 将毫秒和微秒追加到字符串
+  std::stringstream ss;
+  ss << buffer << '.' << std::setfill('0') << std::setw(3) << milliseconds.count()
+     << std::setw(6) << microseconds.count();
+  std::string result = ss.str();
+
+  return result;
 }
 
 
@@ -58,6 +70,23 @@ std::chrono::system_clock::time_point strToTime(const std::string& timeStr) {
     std::tm timeInfo = {};
     std::istringstream ss(timeStr);
     ss >> std::get_time(&timeInfo, "%Y-%m-%d %H:%M:%S");
+
+    // 提取毫秒和微秒字段
+    std::string subSeconds = timeStr.substr(19); // 提取秒及后面的小数点及毫秒微秒部分
+    size_t dotPos = subSeconds.find('.');
+    size_t length = subSeconds.length();
+    int milliseconds = 0;
+    int microseconds = 0;
+    if (dotPos != std::string::npos) {
+      std::string millisecondsStr = subSeconds.substr(dotPos + 1, 3); // 提取毫秒部分
+      std::string microsecondsStr = subSeconds.substr(dotPos + 4, 3); // 提取微秒部分
+      milliseconds = std::stoi(millisecondsStr);
+      microseconds = std::stoi(microsecondsStr);
+    }
+
+    // 设置时间结构的毫秒和微秒字段
+    timeInfo.tm_sec += milliseconds / 1000;       // 将毫秒转换为秒
+    timeInfo.tm_gmtoff += microseconds * 1000;    // 将微秒转换为纳秒
 
     // 将时间结构转换为时间点
     std::time_t time = std::mktime(&timeInfo);
@@ -321,8 +350,8 @@ void Client::sendMessage() {
   int LEN =
       BUFSIZE - (sizeof(my_int) + ip.size() + sizeof(port) + sizeof(my_int) +
                  server_ip.size() + sizeof(server_port) +
-                 sizeof(message.packageSize) + sizeof(message.packageNum) + sizeof(my_int) + message.timestr.size());
-  std::cout << "LEN = " << LEN << " " << message.timestr.size() << " " << message.timestr << std::endl;
+                 sizeof(message.packageSize) + sizeof(message.packageNum) + sizeof(my_int) + message.timestr.size() + sizeof(my_int));
+  // std::cout << "LEN = " << LEN << " " << message.timestr.size() << " " << message.timestr << std::endl;
   int count = 0;
   {
     // std::unique_lock<std::mutex> lock(mtx);
@@ -347,6 +376,7 @@ void Client::sendMessage() {
             if (errno == EWOULDBLOCK || EAGAIN) {
               // std::cout << "套接字缓冲区满了，不能写入 = " << len <<
               // std::endl; sleep(3);
+              if (len == 0) return;
               continue;
             } else {
               std::cout << "写入错误" << std::endl;
@@ -375,7 +405,7 @@ void Client::sendMessage() {
           if (n < 0) {
             if (errno == EWOULDBLOCK || EAGAIN) {
               // std::cout << "套接字缓冲区满了，不能写入 = " << len <<
-              // std::endl; sleep(3);
+              // std::endl;
               continue;
             } else {
               std::cout << "写入错误" << std::endl;
@@ -385,7 +415,6 @@ void Client::sendMessage() {
           }
           len += n;
         }
-
         // std::cout << "写入成功" << std::endl;
         // send(socket_d, buf, BUFSIZE, 0);
         break;
@@ -992,6 +1021,7 @@ void RelayServer::recvMessage() {
                 for (auto pkg : it->second) {
                   pkgStrs += pkg[1];
                 }
+                pkgStrs += message.message;
                 // 组装完成，转发消息
                 message.message = pkgStrs;
                 {
@@ -1108,6 +1138,9 @@ void Server::recvTask(Message message, my_int fd) {
   {
     std::unique_lock<std::mutex> lock(mutex_task);
     auto it = fd_tasks.find(fd);
+    if (it == fd_tasks.end()){
+      std::cout << "fd_tasks中没有找到-1140" << std::endl;
+    }
     // std::cout << "数量 = " << it->second["number"] << std::endl;
     it->second["number"]--;
     if (it->second["isclose"] == 1) {
@@ -1127,15 +1160,20 @@ void Server::recvTask(Message message, my_int fd) {
     }
     close(fd);
     // 计算平均时延，并打印
-    double sum = 0.0;
-    for (auto& it : DelayTime){
-      sum += std::stod(it); 
+    long long int sum = 0;
+    // 只统计后面一千个
+    int count_sum = 0;
+    for (auto s = DelayTime.rbegin(); s != DelayTime.rend(); s++){
+      if (count_sum > 1000) break;
+      sum += std::stoi(*s);
+      count_sum++;
     }
-    std::cout << "平均时延 = " << sum / (DelayTime.size() == 0 ? 1 : DelayTime.size()) << " 收消息数量 = " << DelayTime.size() << std::endl;
+    std::cout << "平均时延 = " << sum*1.0 / (DelayTime.size() == 0 ? 1 : DelayTime.size()) << " 收消息数量 = " << DelayTime.size() << std::endl;
   }
   // }
 }
 
+std::mutex mutex_unique;
 void Server::recvMessage() {
   // 把socket_d套接口设置成非阻塞模式
   // my_int flags = fcntl(socket_d, F_GETFL, 0);
@@ -1221,7 +1259,6 @@ void Server::recvMessage() {
         // }
       } else {
         // 表明是已经建立的连接要通信，而不是客户端请求连接
-
         char buf[BUFSIZE];
         int len = 0, n = 0;
         // 持续读取数据，知道读取BUfSIZE大小的数据
@@ -1241,7 +1278,6 @@ void Server::recvMessage() {
           }
           len += n;
         }
-        // buf[BUFSIZE - 1] = '\0';
         std::string closestr(buf);
         if (closestr == "close") {
           // 服务器关闭自己
@@ -1249,11 +1285,15 @@ void Server::recvMessage() {
           close(epollfd);
           std::cout << "正常的服务器关闭" << std::endl;
           // 计算平均时延，并打印
-          double sum = 0.0;
-          for (auto& itp : DelayTime){
-            sum += std::stod(itp); 
+          long long int sum = 0;
+          // 只统计后面一千个
+          int count_sum = 0;
+          for (auto s = DelayTime.rbegin(); s != DelayTime.rend(); s++){
+            if (count_sum > 1000) break;
+            sum += std::stoi(*s);
+            count_sum++;
           }
-          std::cout << "平均时延 = " << sum / (DelayTime.size() == 0 ? 1 : DelayTime.size()) << " 收消息数量 = " << DelayTime.size() << std::endl;
+          std::cout << "平均时延 = " << sum * 1.0 / (DelayTime.size() == 0 ? 1 : DelayTime.size()) << " 收消息数量 = " << DelayTime.size() << std::endl;
           // 清空
           DelayTime.clear();
           int state = 0;
@@ -1261,6 +1301,7 @@ void Server::recvMessage() {
         }
         if (len == 0) {
           // 表明客户端请求关闭
+          puts("中继器请求关闭");
           auto it = fd_tasks.find(fd);
           if (it == fd_tasks.end()) {
             std::cout << "出现异常情况" << std::endl;
@@ -1298,24 +1339,19 @@ void Server::recvMessage() {
                 }
                 MessageInfo.erase(it);
               }
-              std::cout << "到这儿 = " << DelayTime.size() << std::endl;
+              // std::cout << "到这儿 = " << DelayTime.size() << std::endl;
               // 计算平均时延，并打印
-              long long int sum = 0.0;
-              for (auto& itp : DelayTime){
-                // std::cout << "时延 = " << itp << std::endl;
-                try{
-                  sum += std::stoi(itp); 
-                }catch(const std::exception& ex){
-                  std::cout << ex.what() << std::endl;
-                }
+              long long int sum = 0;
+              // 只统计后面一千个
+              int count_sum = 0;
+              for (auto s = DelayTime.rbegin(); s != DelayTime.rend(); s++){
+                if (count_sum > 1000) break;
+                sum += std::stoi(*s);
+                count_sum++;
               }
-              std::cout << "结束" << std::endl;
               std::cout << "平均时延 = " << sum * 1.0 / (DelayTime.size() == 0 ? 1 : DelayTime.size()) << " 收消息数量 = " << DelayTime.size() << std::endl;
             }
           }
-          // puts("中继器请求关闭");
-          std::cout << std::this_thread::get_id() << "中继器请求关闭 = " << fd
-                    << std::endl;
         } else if (len < 0) {
           std::cout << "epoll读取异常" << std::endl;
         } else {
@@ -1342,11 +1378,14 @@ void Server::recvMessage() {
                 }
               }
               threadPool->enqueue(
-                  [this, strs = message, fd]() mutable { recvTask(strs, fd); });
+                  [this, strs = message, tmpfd = fd]() { recvTask(strs, tmpfd); });
             } else {
               // 2、需要组合，再次判断是不是本次消息的最后一个包，如果是那么就要把所有包拿出来组合消息，然后打印到终端，
               // 如果不是最后一个包，那么就需要把包插入到合适的位置
               auto it = MessageInfo.find(fd);
+              if (it == MessageInfo.end()) {
+                    std::cout << "没找到" << std::endl;
+                  }
               int lent = 0;
               for (auto p : it->second) {
                 lent += p[1].size();
@@ -1361,10 +1400,14 @@ void Server::recvMessage() {
                   pkgStrs += pkg[1];
                 }
                 // 组装完成，打印消息
+                pkgStrs += message.message;
                 message.message = pkgStrs;
                 {
                   std::unique_lock<std::mutex> lock(mutex_task);
                   auto it = fd_tasks.find(fd);
+                  if (it == fd_tasks.end()){
+                    std::cout << "fd_tasks中没有找到-1405" << std::endl;
+                  }
                   // 表明存在fd，需要判断fd是不是可重用的
                   if (it->second["state"] == 1) {
                     // 表明状态是可用的
@@ -1375,11 +1418,14 @@ void Server::recvMessage() {
                     it->second["isclose"] = 0;
                   }
                 }
-                threadPool->enqueue([this, strs = message, fd]() mutable {
-                  recvTask(strs, fd);
+                threadPool->enqueue([this, strs = message, tmpfd = fd]() {
+                  recvTask(strs, tmpfd);
                 });
                 // 删除MessageInfo中的包消息
-                it->second.clear();
+                {
+                  std::unique_lock<std::mutex> lock(mutex_combine);
+                  it->second.clear();
+                }
               } else {
                 // 输出message
                 // std::cout << "packageNum = " << message.packageNum <<

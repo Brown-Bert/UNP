@@ -53,7 +53,7 @@ int main(int argc, char* argv[]) {
   std::vector<Client> clients;
   { // 放在域中，为了出域的时候调用线程池的析构函数
     // 创建线程池
-    ThreadPool threadPool(threadNum);
+    // ThreadPool threadPool(threadNum);
     std::string str = ConstructStringWithByteSize(byteSize);
     for (int i = 0; i < clientNum; i++) {
       if (startPort > (serverPortStart + serverNum - 1)) {
@@ -90,7 +90,7 @@ int main(int argc, char* argv[]) {
         //   }
         // });
         t->sendMessage();
-        // std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        // std::this_thread::sleep_for(std::chrono::milliseconds(50));
       }
     }
   }

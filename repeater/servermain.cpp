@@ -43,7 +43,7 @@ int main(int argc, char* argv[]) {
     server->createSocket();
     // server.recvMessage();
     // 开启线程池
-    server->threadPool = new ThreadPool(10);
+    server->threadPool = new ThreadPool(100);
     // 这种方式接收信息会造成一直卡着，因为内部实现是用while死循环，所以要把每一台服务器做成分离线程
     std::thread t(&Server::recvMessage, server);
     t.detach();  // 线程分离
