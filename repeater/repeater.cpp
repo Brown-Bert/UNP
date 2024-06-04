@@ -712,13 +712,22 @@ void RelayServer::recvTask(Message message, my_int fd) {
   // }
 }
 
+void RelayServer::clearExit() {
+  if (RelayThreadPool != nullptr) {
+    delete RelayThreadPool;
+    RelayThreadPool = nullptr;
+  }
+  servers.clear();
+  MessageInfo.clear();
+  close(socket_d);
+  fd_tasks.clear();
+}
+
 std::mutex mutex_epoll;
 void RelayServer::recvMessage() {
   if (listen(socket_d, 100) < 0) {
     perror("listen()");
-    close(socket_d);
-    // servers.clear();
-    delete RelayThreadPool;
+    clearExit();
     killThread();
     int state = -1;
     pthread_exit(&state);
@@ -730,9 +739,7 @@ void RelayServer::recvMessage() {
   epoll_all[epollfd_t] = v;
   if (epollfd_t < 0) {
     perror("epoll()");
-    close(socket_d);
-    servers.clear();
-    delete RelayThreadPool;
+    clearExit();
     killThread();
     int state = -1;
     pthread_exit(&state);
@@ -743,28 +750,21 @@ void RelayServer::recvMessage() {
     event.events = EPOLLIN;
     epoll_ctl(epollfd_t, EPOLL_CTL_ADD, socket_d, &event);
   }
-
+  auto start_time =
+      std::chrono::system_clock::now();  // 统计包转发数量的开始时间
   struct epoll_event revents[REVENTSSIZE];
-  // 获取当前时间点
-  auto start_time = std::chrono::system_clock::now();
   std::cout << "中继服务器启动" << std::endl;
   while (true) {
     my_int num = epoll_wait(epollfd_t, revents, REVENTSSIZE, -1);
     if (SIGANLSTOP) {
       // 信号中断
-      delete RelayThreadPool;
-      servers.clear();
-      MessageInfo.clear();
-      close(socket_d);
+      clearExit();
       close(epollfd_t);
-      fd_tasks.clear();
       pthread_exit(0);
     }
     if (num < 0) {
       perror("epoll_wait()");
-      delete RelayThreadPool;
-      servers.clear();
-      close(socket_d);
+      clearExit();
       close(epollfd_t);
       pthread_exit(0);
     }
@@ -783,9 +783,7 @@ void RelayServer::recvMessage() {
             break;
           }
           perror("accept()");
-          delete RelayThreadPool;
-          servers.clear();
-          close(socket_d);
+          clearExit();
           close(epollfd_t);
           int state = -1;
           pthread_exit(&state);
@@ -880,6 +878,10 @@ void RelayServer::recvMessage() {
         }
         {
           std::unique_lock<std::mutex> lock(mutex_count);
+          if (count_pkg == 0) {
+            // 获取当前时间点
+            start_time = std::chrono::system_clock::now();
+          }
           count_pkg++;
         }
         if (len == 0) {
@@ -887,8 +889,9 @@ void RelayServer::recvMessage() {
           auto end_time = std::chrono::system_clock::now();
           auto delaytime = std::chrono::duration_cast<std::chrono::seconds>(
               end_time - start_time);
-          std::cout << "平均每秒处理的包数量 = "
-                    << count_pkg / delaytime.count() << std::endl;
+          auto delaytimecount = delaytime.count() == 0 ? 1 : delaytime.count();
+          std::cout << "平均每秒处理的包数量 = " << count_pkg / delaytimecount
+                    << " 时间 = " << delaytimecount << std::endl;
           // 表明客户端请求关闭
           auto it = fd_tasks.find(fd);
           if (it == fd_tasks.end()) {
@@ -973,9 +976,8 @@ void RelayServer::recvMessage() {
           // 1、先判断这个包是不是不需要和其他包组合
           Message message;
           deserializeStruct(buf, message);
-          threadPool->enqueue([this, strs = message, tmpfd = fd]() {
-            recvTask(strs, tmpfd);
-          });
+          threadPool->enqueue(
+              [this, strs = message, tmpfd = fd]() { recvTask(strs, tmpfd); });
           // 手动组包，为了可扩展性，可以组包之后检验消息的合理性
           // {
           //   // std::unique_lock<std::mutex> lock(mutex_combine);
@@ -1006,7 +1008,8 @@ void RelayServer::recvMessage() {
           //       recvTask(strs, tmpfd);
           //     });
           //   } else {
-          //     // 2、需要组合，再次判断是不是本次消息的最后一个包，如果是那么就要把所有包拿出来组合消息，然后打印到终端，
+          //     //
+          //     2、需要组合，再次判断是不是本次消息的最后一个包，如果是那么就要把所有包拿出来组合消息，然后打印到终端，
           //     // 如果不是最后一个包，那么就需要把包插入到合适的位置
           //     auto it = MessageInfo.find(fd);
           //     int lent = 0;
@@ -1014,7 +1017,8 @@ void RelayServer::recvMessage() {
           //       lent += p[1].size();
           //     }
           //     lent += message.message.size();
-          //     // std::cout << "lenttt = " << lent << " " << message.packageSize
+          //     // std::cout << "lenttt = " << lent << " " <<
+          //     message.packageSize
           //     // << std::endl;
           //     if (lent == message.packageSize) {
           //       // puts("最后一个包");
@@ -1064,9 +1068,11 @@ void RelayServer::recvMessage() {
           //         int f = 0;
           //         std::vector<std::vector<std::string>>::iterator
           //             index;  // 用于记录插入位置
-          //         for (auto pkg = it->second.begin(); pkg != it->second.end();
+          //         for (auto pkg = it->second.begin(); pkg !=
+          //         it->second.end();
           //              ++pkg) {
-          //           // std::cout << "进入" << std::stoi(*(pkg->begin())) << " "
+          //           // std::cout << "进入" << std::stoi(*(pkg->begin())) << "
+          //           "
           //           // << message.packageNum << std::endl;
           //           if (message.packageNum < std::stoi(*(pkg->begin()))) {
           //             f = 1;

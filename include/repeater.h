@@ -147,6 +147,7 @@ class RelayServer : public ServerBase {
   void recvTask(Message message, my_int fd) override;
   void myConnect(my_int fd, std::string desIp,
                  my_int desPort);  // 连接远程服务器
+  void clearExit();                // 优雅退出时的清扫工作
 };
 
 /**
