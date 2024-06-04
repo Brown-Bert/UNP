@@ -22,7 +22,7 @@
 #define REVENTSSIZE 10240         // 监听事件的最大数量
 #define BUFSIZE 2048              // 缓冲区的大小
 #define serverPortStart 40000     // 服务器起始端口
-#define serverNum 100             // 开启100台服务器
+#define serverNum 1             // 开启100台服务器
 #define serverIp "192.168.1.236"  // 暂时只考虑所有服务器的ip相同
 // #define serverIp "127.0.0.1" // 本地测试
 #define searchPort 9999

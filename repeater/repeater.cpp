@@ -32,13 +32,6 @@
 ThreadPool *RelayThreadPool;
 int SIGANLSTOP = false;
 
-/**
-  std::string sourceIp;  // 发送消息方的ip
-  my_int sourcePort;     // 发送消息方的端口
-  std::string desIp;     // 接收消息方的ip
-  my_int desPort;        // 接收消息方的端口
-  std::string message;   // 具体的消息
-*/
 
 std::string timeToStr(std::chrono::system_clock::time_point timePoint) {
   // 将时间点转换为时间结构
@@ -357,8 +350,6 @@ void Client::sendMessage() {
                  server_ip.size() + sizeof(server_port) +
                  sizeof(message.packageSize) + sizeof(message.packageNum) +
                  sizeof(my_int) + message.timestr.size() + sizeof(my_int));
-  // std::cout << "LEN = " << LEN << " " << message.timestr.size() << " " <<
-  // message.timestr << std::endl;
   int count = 0;
   {
     // std::unique_lock<std::mutex> lock(mtx);
@@ -422,7 +413,6 @@ void Client::sendMessage() {
           }
           len += n;
         }
-        // std::cout << "写入成功" << std::endl;
         // send(socket_d, buf, BUFSIZE, 0);
         break;
       }
@@ -1178,8 +1168,8 @@ void Server::recvTask(Message message, my_int fd) {
       sum += std::stoi(*s);
       count_sum++;
     }
-    std::cout << "平均时延 = "
-              << sum * 1.0 / (DelayTime.size() == 0 ? 1 : DelayTime.size())
+    std::cout << "线程池中计算平均时延 = "
+              << sum * 1.0 / (DelayTime.size() == 0 ? 1 : count_sum)
               << " 收消息数量 = " << DelayTime.size() << std::endl;
   }
   // }
@@ -1296,19 +1286,6 @@ void Server::recvMessage() {
           close(fd);
           close(epollfd);
           std::cout << "正常的服务器关闭" << std::endl;
-          // 计算平均时延，并打印
-          long long int sum = 0;
-          // 只统计后面一千个
-          int count_sum = 0;
-          for (auto s = DelayTime.rbegin(); s != DelayTime.rend(); s++) {
-            if (count_sum > 1000) break;
-            sum += std::stoi(*s);
-            count_sum++;
-          }
-          std::cout << "平均时延 = "
-                    << sum * 1.0 /
-                           (DelayTime.size() == 0 ? 1 : DelayTime.size())
-                    << " 收消息数量 = " << DelayTime.size() << std::endl;
           // 清空
           DelayTime.clear();
           int state = 0;
@@ -1364,9 +1341,9 @@ void Server::recvMessage() {
                 sum += std::stoi(*s);
                 count_sum++;
               }
-              std::cout << "平均时延 = "
+              std::cout << "主线程中计算平均时延 = "
                         << sum * 1.0 /
-                               (DelayTime.size() == 0 ? 1 : DelayTime.size())
+                               (DelayTime.size() == 0 ? 1 : count_sum)
                         << " 收消息数量 = " << DelayTime.size() << std::endl;
             }
           }
