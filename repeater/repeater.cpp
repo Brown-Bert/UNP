@@ -733,11 +733,6 @@ void RelayServer::recvMessage() {
     int state = -1;
     pthread_exit(&state);
   }
-
-  // 把socket_d套接口设置成非阻塞模式
-  // my_int flags = fcntl(socket_d, F_GETFL, 0);
-  // fcntl(socket_d, F_SETFL, flags | O_NONBLOCK);
-  // 使用epoll
   struct sockaddr_in raddr;
   struct epoll_event event;
   my_int epollfd_t = epoll_create(4);
@@ -753,7 +748,6 @@ void RelayServer::recvMessage() {
     pthread_exit(&state);
   }
   if (flaglock) {
-    std::cout << "进入" << std::endl;
     flaglock = false;
     event.data.fd = socket_d;
     event.events = EPOLLIN;
@@ -768,7 +762,6 @@ void RelayServer::recvMessage() {
     my_int num = epoll_wait(epollfd_t, revents, REVENTSSIZE, -1);
     if (SIGANLSTOP) {
       // 信号中断
-      std::cout << "进入" << std::endl;
       delete RelayThreadPool;
       servers.clear();
       MessageInfo.clear();
@@ -793,11 +786,6 @@ void RelayServer::recvMessage() {
         std::cout << "客户端请求连接" << std::endl;
         socklen_t len = sizeof(raddr);
         my_int newsd = accept(fd, (struct sockaddr * __restrict) & raddr, &len);
-        // int recv_buffer_size;
-        // socklen_t optlen = sizeof(recv_buffer_size);
-        // getsockopt(newsd, SOL_SOCKET, SO_RCVBUF, &recv_buffer_size, &optlen);
-        // std::cout << "中继服务器接收缓冲区大小 = " << recv_buffer_size <<
-        // std::endl;
         if (newsd < 0) {
           if (errno == EWOULDBLOCK) {
             // 表明本次通知的待处理事件全部处理完成
@@ -843,11 +831,8 @@ void RelayServer::recvMessage() {
                   m["state"] = 1;
                   m["isclose"] = 0;
                   fd_tasks[newsd] = m;
-                  // std::cout << "插入 = " << newsd << std::endl;
                 }
                 epoll_ctl(ep.first, EPOLL_CTL_ADD, newsd, &event);
-                // std::cout << "把 " << newsd << " 加入到 =" << ep.first <<
-                // std::endl;
                 ep.second.push_back(newsd);
                 fd_epollfd[newsd] = ep.first;
                 ep_f = 1;
@@ -878,8 +863,6 @@ void RelayServer::recvMessage() {
             }
           }
         }
-        // std::cout << "结束" << std::endl;
-        // }
       } else {
         // 表明是已经建立的连接要通信，而不是客户端请求连接
         // 把数据读出来
@@ -908,27 +891,6 @@ void RelayServer::recvMessage() {
         {
           std::unique_lock<std::mutex> lock(mutex_count);
           count_pkg++;
-          // // 获取当前时间点
-          // auto end_time = std::chrono::system_clock::now();
-          // auto delaytime = std::chrono::duration_cast<std::chrono::seconds>(
-          //     end_time - start_time);
-          // if (delaytime.count() > 5) {
-          //   start_time = std::chrono::system_clock::now();
-          //   std::cout << "平均每秒处理的包数量 = " << count_pkg << " "
-          //             << delaytime.count() << " "
-          //             << count_pkg / delaytime.count() << std::endl;
-          //   std::ofstream outputFile("example.txt");  // 打开文件 example.txt
-
-          //   if (outputFile.is_open()) {  // 检查文件是否成功打开
-          //     outputFile << count_pkg / delaytime.count();  // 写入数据到文件
-
-          //     outputFile.close();  // 关闭文件
-          //     // std::cout << "写入文件成功！" << std::endl;
-          //   } else {
-          //     std::cout << "无法打开文件！" << std::endl;
-          //   }
-          //   count_pkg = 0;
-          // }
         }
         if (len == 0) {
           puts("客户端请求关闭");
@@ -1021,119 +983,118 @@ void RelayServer::recvMessage() {
           // 1、先判断这个包是不是不需要和其他包组合
           Message message;
           deserializeStruct(buf, message);
-          // std::cout << "进入" << std::endl;
-          {
-            // std::unique_lock<std::mutex> lock(mutex_combine);
-            if (message.packageSize == message.message.size()) {
-              // 不需要组包，直接把消息添加到任务池中
-              // sendMessage(sendfd, message);
-              {
-                std::unique_lock<std::mutex> lock(mutex_task);
-                auto it = fd_tasks.find(fd);
-                // std::cout << "任务数量 = " << it->second["number"] <<
-                // std::endl;
-                if (it == fd_tasks.end()) {
-                  std::cout << "没找到===" << fd << std::endl;
-                }
-                // 表明存在fd，需要判断fd是不是可重用的
-                if (it->second["state"] == 1) {
-                  // 表明状态是可用的
-                  it->second["number"]++;
-                } else {
-                  // 不可重用（此种情况是已经被用过，但是用完了）
-                  it->second["state"] = 1;
-                  it->second["number"] = 1;
-                  it->second["isclose"] = 0;
-                }
-              }
-              // std::cout << "加入线程池" << std::endl;
-              threadPool->enqueue([this, strs = message, tmpfd = fd]() {
-                recvTask(strs, tmpfd);
-              });
-            } else {
-              // 2、需要组合，再次判断是不是本次消息的最后一个包，如果是那么就要把所有包拿出来组合消息，然后打印到终端，
-              // 如果不是最后一个包，那么就需要把包插入到合适的位置
-              auto it = MessageInfo.find(fd);
-              int lent = 0;
-              for (auto p : it->second) {
-                lent += p[1].size();
-              }
-              lent += message.message.size();
-              // std::cout << "lenttt = " << lent << " " << message.packageSize
-              // << std::endl;
-              if (lent == message.packageSize) {
-                // puts("最后一个包");
-                // 表明是最后一个包
-                // 组装包消息
-                std::string pkgStrs = "";
-                for (auto pkg : it->second) {
-                  pkgStrs += pkg[1];
-                }
-                pkgStrs += message.message;
-                // 组装完成，转发消息
-                message.message = pkgStrs;
-                {
-                  std::unique_lock<std::mutex> lock(mutex_task);
-                  auto it = fd_tasks.find(fd);
-                  if (it == fd_tasks.end()) {
-                    std::cout << "没找到===" << std::endl;
-                  }
-                  // 表明存在fd，需要判断fd是不是可重用的
-                  if (it->second["state"] == 1) {
-                    // 表明状态是可用的
-                    it->second["number"]++;
-                  } else {
-                    // 不可重用（此种情况是已经被用过，但是用完了）
-                    it->second["state"] = 1;
-                    it->second["number"] = 1;
-                    it->second["isclose"] = 0;
-                  }
-                }
-                // std::cout << "加入线程池" << std::endl;
-                threadPool->enqueue([this, strs = message, tmpfd = fd]() {
-                  recvTask(strs, tmpfd);
-                });
-                // 删除MessageInfo中的包消息
-                it->second.clear();
-              } else {
-                // 输出message
-                // std::cout << "message = " << message.message << std::endl;
-                // 表明不是最后一个包，需要把包插入到合适的位置
-                std::vector<std::string> v;
-                v.push_back(std::to_string(message.packageNum));
-                v.push_back(message.message);
-                if (it->second.size() == 0) {
-                  // 直接插入
-                  it->second.push_back(v);
-                } else {
-                  int f = 0;
-                  std::vector<std::vector<std::string>>::iterator
-                      index;  // 用于记录插入位置
-                  for (auto pkg = it->second.begin(); pkg != it->second.end();
-                       ++pkg) {
-                    // std::cout << "进入" << std::stoi(*(pkg->begin())) << " "
-                    // << message.packageNum << std::endl;
-                    if (message.packageNum < std::stoi(*(pkg->begin()))) {
-                      f = 1;
-                      index = pkg;
-                    }
-                  }
-                  // puts("测试");
-                  if (f == 0) {
-                    // 直接在末尾插入
-                    it->second.push_back(v);
-                  } else {
-                    it->second.insert(index, v);
-                  }
-                  // puts("结束");
-                }
-              }
-            }
-          }
-          // std::cout << "添加任务 " << fd << std::endl;
-          // 把任务加入任务队列
-          // 记录套接字相关的任务数
-          // 先查询fd_tasks中是不是已经存在fd
+          threadPool->enqueue([this, strs = message, tmpfd = fd]() {
+            recvTask(strs, tmpfd);
+          });
+          // 手动组包，为了可扩展性，可以组包之后检验消息的合理性
+          // {
+          //   // std::unique_lock<std::mutex> lock(mutex_combine);
+          //   if (message.packageSize == message.message.size()) {
+          //     // 不需要组包，直接把消息添加到任务池中
+          //     // sendMessage(sendfd, message);
+          //     {
+          //       std::unique_lock<std::mutex> lock(mutex_task);
+          //       auto it = fd_tasks.find(fd);
+          //       // std::cout << "任务数量 = " << it->second["number"] <<
+          //       // std::endl;
+          //       if (it == fd_tasks.end()) {
+          //         std::cout << "没找到===" << fd << std::endl;
+          //       }
+          //       // 表明存在fd，需要判断fd是不是可重用的
+          //       if (it->second["state"] == 1) {
+          //         // 表明状态是可用的
+          //         it->second["number"]++;
+          //       } else {
+          //         // 不可重用（此种情况是已经被用过，但是用完了）
+          //         it->second["state"] = 1;
+          //         it->second["number"] = 1;
+          //         it->second["isclose"] = 0;
+          //       }
+          //     }
+          //     // std::cout << "加入线程池" << std::endl;
+          //     threadPool->enqueue([this, strs = message, tmpfd = fd]() {
+          //       recvTask(strs, tmpfd);
+          //     });
+          //   } else {
+          //     // 2、需要组合，再次判断是不是本次消息的最后一个包，如果是那么就要把所有包拿出来组合消息，然后打印到终端，
+          //     // 如果不是最后一个包，那么就需要把包插入到合适的位置
+          //     auto it = MessageInfo.find(fd);
+          //     int lent = 0;
+          //     for (auto p : it->second) {
+          //       lent += p[1].size();
+          //     }
+          //     lent += message.message.size();
+          //     // std::cout << "lenttt = " << lent << " " << message.packageSize
+          //     // << std::endl;
+          //     if (lent == message.packageSize) {
+          //       // puts("最后一个包");
+          //       // 表明是最后一个包
+          //       // 组装包消息
+          //       std::string pkgStrs = "";
+          //       for (auto pkg : it->second) {
+          //         pkgStrs += pkg[1];
+          //       }
+          //       pkgStrs += message.message;
+          //       // 组装完成，转发消息
+          //       message.message = pkgStrs;
+          //       {
+          //         std::unique_lock<std::mutex> lock(mutex_task);
+          //         auto it = fd_tasks.find(fd);
+          //         if (it == fd_tasks.end()) {
+          //           std::cout << "没找到===" << std::endl;
+          //         }
+          //         // 表明存在fd，需要判断fd是不是可重用的
+          //         if (it->second["state"] == 1) {
+          //           // 表明状态是可用的
+          //           it->second["number"]++;
+          //         } else {
+          //           // 不可重用（此种情况是已经被用过，但是用完了）
+          //           it->second["state"] = 1;
+          //           it->second["number"] = 1;
+          //           it->second["isclose"] = 0;
+          //         }
+          //       }
+          //       // std::cout << "加入线程池" << std::endl;
+          //       threadPool->enqueue([this, strs = message, tmpfd = fd]() {
+          //         recvTask(strs, tmpfd);
+          //       });
+          //       // 删除MessageInfo中的包消息
+          //       it->second.clear();
+          //     } else {
+          //       // 输出message
+          //       // std::cout << "message = " << message.message << std::endl;
+          //       // 表明不是最后一个包，需要把包插入到合适的位置
+          //       std::vector<std::string> v;
+          //       v.push_back(std::to_string(message.packageNum));
+          //       v.push_back(message.message);
+          //       if (it->second.size() == 0) {
+          //         // 直接插入
+          //         it->second.push_back(v);
+          //       } else {
+          //         int f = 0;
+          //         std::vector<std::vector<std::string>>::iterator
+          //             index;  // 用于记录插入位置
+          //         for (auto pkg = it->second.begin(); pkg != it->second.end();
+          //              ++pkg) {
+          //           // std::cout << "进入" << std::stoi(*(pkg->begin())) << " "
+          //           // << message.packageNum << std::endl;
+          //           if (message.packageNum < std::stoi(*(pkg->begin()))) {
+          //             f = 1;
+          //             index = pkg;
+          //           }
+          //         }
+          //         // puts("测试");
+          //         if (f == 0) {
+          //           // 直接在末尾插入
+          //           it->second.push_back(v);
+          //         } else {
+          //           it->second.insert(index, v);
+          //         }
+          //         // puts("结束");
+          //       }
+          //     }
+          //   }
+          // }
         }
       }
     }

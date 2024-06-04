@@ -11,7 +11,6 @@ void signalHandler(int signal) {
   // 释放中继服务器的线程池
   killThread();
   SIGANLSTOP = true;
-  // exit(0);
 }
 
 int main(int argc, char* argv[]) {
@@ -37,15 +36,9 @@ int main(int argc, char* argv[]) {
   std::vector<std::thread> EpollHandlers;
   for (int i = 0; i < 120; i++) {
     std::thread t(&RelayServer::recvMessage, &relayServer);
-    // EpollHandlers.push_back(std::move(t));
     t.detach();
   }
-  // relayServer.recvMessage();
-  // killThread();
   my_int f = 0;
   std::cin >> f;
-  // for (auto& t : EpollHandlers){
-  //   t.join();
-  // }
   return 0;
 }
