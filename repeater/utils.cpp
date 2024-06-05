@@ -4,6 +4,7 @@
 #include <netinet/in.h>
 #include <unistd.h>
 
+#include <cstdio>
 #include <cstring>
 #include <iomanip>
 
@@ -15,7 +16,8 @@
 std::string timeToStr(std::chrono::system_clock::time_point timePoint) {
   // 将时间点转换为时间结构
   std::time_t time = std::chrono::system_clock::to_time_t(timePoint);
-  std::tm *timeInfo = std::localtime(&time);
+  std::tm timeInfo;
+  localtime_r(&time, &timeInfo);
 
   // 获取毫秒和微秒级时间间隔
   auto duration = timePoint.time_since_epoch();
@@ -26,7 +28,12 @@ std::string timeToStr(std::chrono::system_clock::time_point timePoint) {
 
   // 格式化时间结构为字符串
   char buffer[80];
-  std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", timeInfo);
+  std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", &timeInfo);
+  if (buffer[12] == '8') {
+    // std::cout << "start = " << std::put_time(timeInfo, "%Y-%m-%d %H:%M:%S") << std::endl;
+    puts(buffer);
+  }
+  // puts(buffer);
 
   // 将毫秒和微秒追加到字符串
   std::stringstream ss;

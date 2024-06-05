@@ -61,6 +61,10 @@ void Server::recvTask(Message message, my_int fd) {
   // 计算时间差
   auto delaytime = std::chrono::duration_cast<std::chrono::microseconds>(
       endtime - starttime);
+  if (std::to_string(delaytime.count()).size() > 10)
+  Logger::getInstance()->writeLogger(Logger::INFO, "start = " + message.timestr +
+                                                       " end = " +
+                                                       timeToStr(endtime));
 
   {
     std::unique_lock<std::mutex> lock(mutex_delay);
@@ -300,6 +304,7 @@ void Server::recvMessage() {
               int count_sum = 0;
               for (auto s = DelayTime.rbegin(); s != DelayTime.rend(); s++) {
                 if (count_sum > 1000) break;
+                std::cout << *s << std::endl;
                 sum += std::stoi(*s);
                 count_sum++;
               }
