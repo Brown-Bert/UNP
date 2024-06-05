@@ -115,10 +115,8 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-#include <chrono>
 #include <csignal>
 #include <iostream>
-#include <random>
 #include <string>
 #include <thread>
 #include <vector>
@@ -126,7 +124,7 @@
 #include "client.hpp"
 #include "log.hpp"
 #include "macro.hpp"
-#include "threadPool.hpp"
+
 std::ofstream logFileObj("./log/client_logger.txt");
 Logger* Logger::instance = nullptr;
 bool CLIENTSTOP = false;  //终止线程标志

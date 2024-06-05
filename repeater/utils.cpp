@@ -29,11 +29,6 @@ std::string timeToStr(std::chrono::system_clock::time_point timePoint) {
   // 格式化时间结构为字符串
   char buffer[80];
   std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", &timeInfo);
-  if (buffer[12] == '8') {
-    // std::cout << "start = " << std::put_time(timeInfo, "%Y-%m-%d %H:%M:%S") << std::endl;
-    puts(buffer);
-  }
-  // puts(buffer);
 
   // 将毫秒和微秒追加到字符串
   std::stringstream ss;

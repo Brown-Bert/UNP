@@ -8,7 +8,6 @@
 #include <unistd.h>
 
 #include <algorithm>
-#include <cstdint>
 #include <cstdio>
 #include <string>
 
@@ -425,7 +424,7 @@ void RelayServer::recvMessage() {
         std::cout << "客户端请求连接" << std::endl;
         Logger::getInstance()->writeLogger(Logger::INFO, "客户端请求连接");
         socklen_t len = sizeof(raddr);
-        my_int newsd = accept(fd, (struct sockaddr *__restrict)&raddr, &len);
+        my_int newsd = accept(fd, (struct sockaddr * __restrict) & raddr, &len);
         if (newsd < 0) {
           if (errno == EWOULDBLOCK || errno == EAGAIN) {
             // 表明本次通知的待处理事件全部处理完成
