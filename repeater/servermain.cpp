@@ -24,6 +24,16 @@ void signalHandler(my_int signal) {
 }
 
 my_int main(my_int argc, char* argv[]) {
+
+  if (argc < 2) {
+    std::cerr << "./servermain <每个服务器线程池中线程个数>" << std::endl;
+    Logger::getInstance()->writeLogger(Logger::ERROR,
+                                       "参数有问题 in clientmain");
+    return 0;
+  }
+
+  my_int server_poll_num = std::stoi(argv[1]); 
+
   struct sigaction sa;
   sa.sa_handler = signalHandler;  // 设置信号处理函数
   sigemptyset(&sa.sa_mask);       // 清空信号屏蔽字
@@ -48,7 +58,7 @@ my_int main(my_int argc, char* argv[]) {
     serverHandles.push_back(server);
     server->createSocket();
     // 开启线程池
-    server->threadPool = new ThreadPool(100);
+    server->threadPool = new ThreadPool(server_poll_num);
     // 这种方式接收信息会造成一直卡着，因为内部实现是用while死循环，所以要把每一台服务器做成分离线程
     std::thread t(&Server::recvMessage, server);
     t.detach();  // 线程分离
