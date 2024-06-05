@@ -4,15 +4,15 @@ set(CMAKE_CXX_COMPILER "/usr/bin/g++" )
 
 add_compile_options(-O0)
 
-add_library(library repeater.cpp)
+add_library(library utils.cpp)
 
-add_executable(clientmain clientmain.cpp)
+add_executable(clientmain clientmain.cpp client.cpp)
 target_link_libraries(clientmain library -lpthread)
 
-add_executable(relaymain relaymain.cpp)
+add_executable(relaymain relaymain.cpp relay.cpp)
 target_link_libraries(relaymain library -lpthread)
 
-add_executable(servermain servermain.cpp)
+add_executable(servermain servermain.cpp server.cpp)
 target_link_libraries(servermain library -lpthread)
 
 add_executable(searchmain searchmain.cpp)

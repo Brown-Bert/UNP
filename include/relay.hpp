@@ -1,23 +1,18 @@
-#ifndef REPEATER_H_
-#define REPEATER_H_
+/**
+    @file relay.h
+    @brief RelayServer class header file
+*/
 
-#include <unistd.h>
+#ifndef RELAY_H_
+#define RELAY_H_
 
-// #include <boost/coroutine2/coroutine.hpp>
-#include <mutex>
-#include <string>
+#include "base.hpp"
+#include "log.hpp"
+#include "macro.hpp"
 
-#include "threadPool.h"
-// #include <boost/coroutine2/all.hpp>
-#include <iostream>
-#include <map>
-#include <vector>
-#include "macro.h"
-
-
-int sendMessage(my_int socket_d,
-                Message& mt);  // 运行客户端并发送消息，msg:具体要发送的消息
-
+/**
+    @brief 中继器回话消息结构体
+*/
 typedef struct {
   std::string desIp;  // 目的地的ip
   my_int desPort;     // 目的地的端口
@@ -25,9 +20,8 @@ typedef struct {
 } Info;
 
 /**
-  中继服务器
+  @brief 中继服务器类
 */
-extern ThreadPool* RelayThreadPool;
 class RelayServer : public ServerBase {
  public:
   my_int socket_d;                    // 中继服务器的套接字描述符
@@ -43,14 +37,13 @@ class RelayServer : public ServerBase {
   my_int flaglock = true;
   std::mutex mutex_send;
   std::mutex mutex_count;
-  my_int count_pkg = 0;
+  my_int count_pkg = 0;  // 用于统计中继服务器每秒平均转发报文数量
 
  public:
   RelayServer();  // 初始化中继服务器的同时初始化servers变量，并且单独开出一个线程用于输出信息
   ~RelayServer() {
-    std::cout << "中继服务器析构" << std::endl;
+    Logger::getInstance()->writeLogger(Logger::INFO, "中继服务器析构");
     servers.clear();
-    // delete threadPool;
   }  // 释放指向线程池的指针
   void createSocket() override;
   my_int selfCreateSocket(
@@ -68,27 +61,4 @@ class RelayServer : public ServerBase {
   void clearExit();                // 优雅退出时的清扫工作
 };
 
-/**
-  @brief 服务器
-*/
-class Server : public ServerBase {
- public:
-  std::vector<std::string> DelayTime;  //计算消息时延
- public:
-  ~Server() { delete threadPool; }
-  Server(my_int port, std::string ip) {
-    this->ip = ip;
-    this->port = port;
-  };
-  void createSocket() override;  // 创建客户端网络套接字描述符
-  void recvTask(Message message, my_int fd) override;
-  void recvMessage() override;  // 运行客户端并发送消息，msg:具体要发送的消息
-  std::map<my_int, std::map<std::string, my_int>>
-      fd_tasks;  // 因为多线程操作同一个描述符，会造成其他线程在处理任务的时候，有一个线程已经接收到了关闭套接字描述符的任务
-  // 为了确保关闭套接字之前，关于套接字的任务全部执行完毕，需要记录套接字相关的任务数量
-  void killSelf();  // 服务器自己杀死这个分离的线程
-};
-
-void searchClient();
-void killThread();  // 中继器自己杀死这个分离的线程
 #endif
