@@ -16,8 +16,8 @@ void serializeStruct(const Message& message,
 void deserializeStruct(const char* tmp,
                        Message& message);  // 反序列化字节流为结构体
 
-int sendMessage(my_int socket_d,
-                Message& mt);  // 中继服务器使用的发送消息的工具函数
+my_int sendMessage(my_int socket_d,
+                   Message& mt);  // 中继服务器使用的发送消息的工具函数
 
 void analysis(char* buffer, my_int bytesRead);  // 解析信息
 

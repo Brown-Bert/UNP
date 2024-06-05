@@ -187,7 +187,7 @@ void deserializeStruct(const char *tmp, Message &message) {
   @param socket_d 要发送数据的套接字描述符
   @param mt 要发送的结构体消息
 */
-int sendMessage(my_int socket_d, Message &mt) {
+my_int sendMessage(my_int socket_d, Message &mt) {
   // 如果消息够长，则会造成缓冲区溢出，而且自己定义的数据结构在接收方并不能按照预计的那样去读取，
   // 所以需要将具体的消息手动切片或者补齐
   // 发送信息
