@@ -11,7 +11,7 @@
 #include "threadPool.hpp"
 
 std::vector<Server*> serverHandles;
-std::ofstream logFileObj("../log/server_logger.txt");
+std::ofstream logFileObj("./log/server_logger.txt");
 Logger* Logger::instance = nullptr;
 
 void signalHandler(my_int signal) {

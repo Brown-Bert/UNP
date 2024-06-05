@@ -10,7 +10,7 @@
 #include "utils.hpp"
 extern ThreadPool* RelayThreadPool;
 extern int SIGANLSTOP;
-std::ofstream logFileObj("../log/logger.txt");
+std::ofstream logFileObj("./log/logger.txt");
 Logger* Logger::instance = nullptr;
 // 中继服务器注册信号行为函数
 void signalHandler(my_int signal) {
