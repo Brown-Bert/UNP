@@ -35,9 +35,6 @@ class RelayServer : public ServerBase {
       epoll_all;  // 记录每个epoll管理了哪些个描述符
   std::map<my_int, my_int> fd_epollfd;  // 记录每个描述符对应的epollfd
   my_int flaglock = true;
-  std::mutex mutex_send;
-  std::mutex mutex_count;
-  my_int count_pkg = 0;  // 用于统计中继服务器每秒平均转发报文数量
 
  public:
   RelayServer();  // 初始化中继服务器的同时初始化servers变量，并且单独开出一个线程用于输出信息

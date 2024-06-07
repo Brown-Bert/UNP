@@ -9,6 +9,8 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <exception>
+#include <mutex>
 #include <string>
 
 #include "log.hpp"
@@ -213,6 +215,9 @@ std::mutex mutex_infos;    // 会话信息的锁
 std::mutex mutex_epollfd;  // epoll实例的锁
 std::mutex mutex_task;     // 任务锁
 std::mutex mutex_combine;  // 组包的锁
+std::mutex mutex_send;
+std::mutex mutex_count;
+my_int count_pkg = 0;  // 用于统计中继服务器每秒平均转发报文数量
 
 /**
     @brief 任务池任务队列中的任务函数
@@ -220,6 +225,7 @@ std::mutex mutex_combine;  // 组包的锁
     @param fd 转发的套接字描述符
 */
 void RelayServer::recvTask(Message message, my_int fd) {
+  Logger::getInstance()->writeLogger(Logger::INFO, "测试开始");
   int closeFlag = 0;
   /**
     @brief 测试代码 检测是否产生粘包
@@ -279,6 +285,9 @@ void RelayServer::recvTask(Message message, my_int fd) {
     std::unique_lock<std::mutex> lock(mutex_send);
     my_int res_len = sendMessage(sendfd, message);
     if (res_len == 0) {
+      Logger::getInstance()->writeLogger(
+          Logger::WARNING,
+          "sendMessage 转发消息后失败，再次转发 in relayserver recvTask");
       threadPool->enqueue(
           [this, strs = message, tmpfd = fd]() { recvTask(strs, tmpfd); });
       return;
@@ -289,6 +298,7 @@ void RelayServer::recvTask(Message message, my_int fd) {
     }
   }
   Logger::getInstance()->writeLogger(Logger::INFO, "数据转发成功");
+  Logger::getInstance()->writeLogger(Logger::INFO, "测试结束");
   // 任务处理完成减少fd相关的任务数量记录
   {
     std::unique_lock<std::mutex> lock(mutex_task);
@@ -488,6 +498,7 @@ void RelayServer::recvMessage() {
             }
           }
         }
+        Logger::getInstance()->writeLogger(Logger::INFO, "客户端连接成功");
       } else {
         // 表明是已经建立的连接要通信，而不是客户端请求连接
         // 把数据读出来
@@ -622,10 +633,10 @@ void RelayServer::recvMessage() {
           Logger::getInstance()->writeLogger(
               Logger::ERROR, "epoll读取异常 in relayserver recvMessage");
         } else {
-          //消息处理，每个线程接收到的消息只是一个包，有些发送方的消息不只是只有一个包，所有线程之间要协作组合包
-          // 1、先判断这个包是不是不需要和其他包组合
+          // 把包直接放到线程池任务队列中
           Message message;
           deserializeStruct(buf, message);
+          // 输出message
           threadPool->enqueue(
               [this, strs = message, tmpfd = fd]() { recvTask(strs, tmpfd); });
         }

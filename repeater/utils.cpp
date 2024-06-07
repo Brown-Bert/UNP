@@ -7,6 +7,9 @@
 #include <cstdio>
 #include <cstring>
 #include <iomanip>
+#include <mutex>
+
+#include "log.hpp"
 
 /**
   @brief 把时间格式转换成字符串格式，方便在网络中传输
@@ -133,48 +136,65 @@ void serializeStruct(const Message &message, char *buffer) {
   @param tmp 需要反序列化的字符数组
   @param message 反序列化之后消息存入的结构体
 */
+// std::mutex mutex_test;
 void deserializeStruct(const char *tmp, Message &message) {
-  // 反序列化发送方字符串成员的长度和字符数据
-  int messageLength;
-  memcpy(&messageLength, tmp, sizeof(my_int));
-  tmp += sizeof(my_int);
-  // std::cout << "ggg = " << messageLength << std::endl;
-  message.sourceIp.assign(tmp, messageLength);
-  tmp += messageLength;
+  {
+    // std::unique_lock<std::mutex> lock(mutex_test);
+    // std::cout << "start" << std::endl;
+    // 反序列化发送方字符串成员的长度和字符数据
+    int messageLength;
+    memcpy(&messageLength, tmp, sizeof(my_int));
+    tmp += sizeof(my_int);
+    // std::cout << "messageLength = " << messageLength << std::endl;
+    message.sourceIp.assign(tmp, messageLength);
+    tmp += messageLength;
+    // std::cout << "sourceIp = " << message.sourceIp << std::endl;
 
-  // 反序列化发送方的port
-  memcpy(&message.sourcePort, tmp, sizeof(my_int));
-  tmp += sizeof(my_int);
+    // 反序列化发送方的port
+    memcpy(&message.sourcePort, tmp, sizeof(my_int));
+    tmp += sizeof(my_int);
+    // std::cout << "sourcePort = " << message.sourcePort << std::endl;
 
-  // 反序列化接收方字符串成员的长度和字符数据
-  memcpy(&messageLength, tmp, sizeof(my_int));
-  tmp += sizeof(my_int);
-  message.desIp.assign(tmp, messageLength);
-  tmp += messageLength;
+    // 反序列化接收方字符串成员的长度和字符数据
+    memcpy(&messageLength, tmp, sizeof(my_int));
+    tmp += sizeof(my_int);
+    // std::cout << "messageLength = " << messageLength << std::endl;
+    message.desIp.assign(tmp, messageLength);
+    tmp += messageLength;
+    // std::cout << "desIp = " << message.desIp << std::endl;
 
-  // 反序列化接收方的port
-  memcpy(&message.desPort, tmp, sizeof(my_int));
-  tmp += sizeof(my_int);
+    // 反序列化接收方的port
+    memcpy(&message.desPort, tmp, sizeof(my_int));
+    tmp += sizeof(my_int);
+    // std::cout << "desPort = " << message.desPort << std::endl;
 
-  // 反序列化接收方的包大小
-  memcpy(&message.packageSize, tmp, sizeof(my_int));
-  tmp += sizeof(my_int);
+    // 反序列化接收方的包大小
+    memcpy(&message.packageSize, tmp, sizeof(my_int));
+    tmp += sizeof(my_int);
+    // std::cout << "packageSize = " << message.packageSize << std::endl;
 
-  // 反序列化接收方的包编号
-  memcpy(&message.packageNum, tmp, sizeof(my_int));
-  tmp += sizeof(int);
+    // 反序列化接收方的包编号
+    memcpy(&message.packageNum, tmp, sizeof(my_int));
+    tmp += sizeof(int);
+    // std::cout << "packageNum = " << message.packageNum << std::endl;
 
-  // 反序列化时间消息
-  memcpy(&messageLength, tmp, sizeof(my_int));
-  tmp += sizeof(my_int);
-  message.timestr.assign(tmp, messageLength);
-  tmp += messageLength;
+    // 反序列化时间消息
+    memcpy(&messageLength, tmp, sizeof(my_int));
+    tmp += sizeof(my_int);
+    // std::cout << "messageLength = " << messageLength << std::endl;
+    message.timestr.assign(tmp, messageLength);
+    tmp += messageLength;
+    // std::cout << "timestr = " << message.timestr << std::endl;
 
-  // 反序列化具体消息
-  memcpy(&messageLength, tmp, sizeof(my_int));
-  tmp += sizeof(my_int);
-  message.message.assign(tmp, messageLength);
-  tmp += messageLength;
+    // 反序列化具体消息
+    memcpy(&messageLength, tmp, sizeof(my_int));
+    tmp += sizeof(my_int);
+    // std::cout << "messageLength = " << messageLength << std::endl;
+    message.message.assign(tmp, messageLength);
+    tmp += messageLength;
+    // std::cout << "message = " << message.message << std::endl;
+    // std::cout << "end" << std::endl;
+  }
 }
 
 /**
@@ -208,21 +228,14 @@ my_int sendMessage(my_int socket_d, Message &mt) {
       msg = msg.substr(LEN);
       // 将结构体序列化
       char buf[BUFSIZE] = {'\0'};
-      // memcpy(buf, &message, sizeof(message));
       serializeStruct(message, buf);
-      // buf[BUFSIZE - 1] = '\0';
-      // write(socket_d, buf, BUFSIZE);
       errno = 0;
       my_int len = 0;
-      // std::cout << "fd = " << socket_d << std::endl;
       {
-        // std::unique_lock<std::mutex> lock(mtx);
         while (len < BUFSIZE) {
           my_int n = write(socket_d, buf + len, BUFSIZE - len);
           if (n < 0) {
             if (errno == EWOULDBLOCK || EAGAIN) {
-              // std::cout << "套接字缓冲区满了，不能写入 = " << len <<
-              // std::endl; sleep(3);
               continue;
             } else {
               std::cout << "写入错误" << std::endl;
@@ -233,27 +246,19 @@ my_int sendMessage(my_int socket_d, Message &mt) {
           len += n;
         }
       }
-      // send(socket_d, buf, BUFSIZE, 0);
     } else {
       message.message = msg;
       message.packageNum = count;
       // 将结构体序列化
       char buf[BUFSIZE] = {'\0'};
-      // memcpy(buf, &message, sizeof(message));
       serializeStruct(message, buf);
-      // buf[BUFSIZE - 1] = '\0';
-      // write(socket_d, buf, BUFSIZE);
       errno = 0;
       my_int len = 0;
-      // std::cout << "fd = " << socket_d << std::endl;
       {
-        // std::unique_lock<std::mutex> lock(mtx);
         while (len < BUFSIZE) {
           my_int n = write(socket_d, buf + len, BUFSIZE - len);
           if (n < 0) {
             if (errno == EWOULDBLOCK || EAGAIN) {
-              // std::cout << "套接字缓冲区满了，不能写入 = " << len <<
-              // std::endl;
               if (len == 0)
                 return len;
               else
@@ -267,8 +272,6 @@ my_int sendMessage(my_int socket_d, Message &mt) {
           len += n;
         }
       }
-      // std::cout << "写入成功" << std::endl;
-      // send(socket_d, buf, BUFSIZE, 0);
       break;
     }
   }
@@ -367,7 +370,7 @@ void searchClient() {
 }
 
 /**
-  @brief 中继器自己杀死这个分离的线程
+  @brief 中继器自己杀死查询线程
 */
 void killThread() {
   struct sockaddr_in raddr;
@@ -379,14 +382,12 @@ void killThread() {
 
   int val = 1;
   setsockopt(socket_d, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val));
-  // setsockopt(socket_d, SOL_SOCKET, SO_SNDBUF, &val, sizeof(val));
 
   if (connect(socket_d, (const struct sockaddr *)&raddr, sizeof(raddr)) < 0) {
     perror("connect()");
     exit(-1);
   }
-  // 休眠毫秒级别
-  // std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
   char buf[6] = {'c', 'l', 'o', 's', 'e', '\0'};
   write(socket_d, buf, 6);
   close(socket_d);
