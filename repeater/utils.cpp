@@ -7,9 +7,6 @@
 #include <cstdio>
 #include <cstring>
 #include <iomanip>
-#include <mutex>
-
-#include "log.hpp"
 
 /**
   @brief 把时间格式转换成字符串格式，方便在网络中传输
