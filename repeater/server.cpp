@@ -62,9 +62,11 @@ void Server::recvTask(Message message, my_int fd) {
   auto delaytime = std::chrono::duration_cast<std::chrono::microseconds>(
       endtime - starttime);
   if (std::to_string(delaytime.count()).size() > 10)
-  Logger::getInstance()->writeLogger(Logger::INFO, "start = " + message.timestr +
+  {
+    Logger::getInstance()->writeLogger(Logger::INFO, "start = " + message.timestr +
                                                        " end = " +
                                                        timeToStr(endtime));
+  }
 
   {
     std::unique_lock<std::mutex> lock(mutex_delay);
