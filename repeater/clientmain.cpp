@@ -9,9 +9,12 @@
 // #include <thread>
 // #include <vector>
 
-// #include "repeater.h"
-// #include "threadPool.h"
+// #include "client.hpp"
+// #include "threadPool.hpp"
+// #include "log.hpp"
 
+// std::ofstream logFileObj("./log/client_logger.txt");
+// Logger* Logger::instance = nullptr;
 // bool CLIENTSTOP = false;
 
 // void signalHandler(int signal) {
@@ -34,13 +37,19 @@
 //   // 注册信号处理程序
 //   if (sigaction(SIGINT, &sa, NULL) == -1) {
 //     std::cerr << "Failed to register signal handler" << std::endl;
+//     Logger::getInstance()->writeLogger(
+//         Logger::ERROR, "Failed to register signal handler in clientmain");
 //     exit(-1);
 //   } else {
 //     std::cout << "信号注册成功" << std::endl;
+//     Logger::getInstance()->writeLogger(Logger::INFO,
+//                                        "信号注册成功 in clientmain");
 //   }
 //   // 构造1000个客户端给100个服务器发送消息
 //   if (argc < 4) {
-//     std::cerr << "参数有问题" << std::endl;
+//     std::cerr << "./clientmain <会话个数> <数据大小> <线程个数>" << std::endl;
+//     Logger::getInstance()->writeLogger(Logger::ERROR,
+//                                        "参数有问题 in clientmain");
 //     return 0;
 //   }
 //   my_int startPort = serverPortStart;
